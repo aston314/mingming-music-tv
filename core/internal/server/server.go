@@ -28,6 +28,8 @@ type Server struct {
 	token                      string
 	handler                    http.Handler
 	scans                      scanManager
+	playbackMu                 sync.Mutex
+	playbackSequences          map[string]uint64
 }
 
 func New(cfg product.Config, version, instance, dataDir string, fixture bool) *Server {
@@ -53,6 +55,7 @@ func New(cfg product.Config, version, instance, dataDir string, fixture bool) *S
 	mux.HandleFunc("/api/user", s.user)
 	mux.HandleFunc("/api/logout", s.logout)
 	mux.HandleFunc("/api/library", s.library)
+	mux.HandleFunc("/api/playback", s.playback)
 	mux.HandleFunc("/api/scan", s.scanAPI)
 	mux.HandleFunc("/api/scan/", s.scanAPI)
 	mux.HandleFunc("/media", s.media)

@@ -36,6 +36,48 @@
 
   var focusMemory = {content: {}, footerReturn: null, overlayControl: "overlay-queue"};
   var libraryWrite = {inFlight: false, pending: false, revision: 0, callbacks: []};
+  var playback = {position: 0, duration: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false};
+  var playbackWrite = {clientId: String(Date.now()) + "-" + String(Math.random()).slice(2), sequence: 0, revision: 0, inFlight: false, pending: null, lastSave: 0};
+  function playbackPosition() { return playback.pendingSeek != null ? playback.pendingSeek : (playback.sourceReady ? (audio.currentTime || 0) : playback.position); }
+  function playbackDuration() { return playback.sourceReady && isFinite(audio.duration) && audio.duration > 0 ? audio.duration : playback.duration; }
+  function snapshotTrack(song) {
+    var copy = {}, keys = ["id", "name", "title", "mainTitle", "artist", "album", "type", "provider", "source", "picUrl", "coverPath", "image", "pic", "pic_id", "dt", "duration", "interval", "time", "ar", "artists", "al"], i;
+    for (i = 0; i < keys.length; i++) if (song[keys[i]] != null) copy[keys[i]] = song[keys[i]];
+    return copy;
+  }
+  function savePlayback(synchronous) {
+    var body, xhr;
+    playbackWrite.revision += 1;
+    if (!state.current) return;
+    body = JSON.stringify({clientId: playbackWrite.clientId, sequence: ++playbackWrite.sequence, snapshot: {schema: 1, track: snapshotTrack(state.current), position: playbackPosition(), duration: playbackDuration(), mode: state.playMode, list: state.playbackList.slice(0, 500).map(snapshotTrack), listSource: state.playbackListSource}});
+    playbackWrite.lastSave = Date.now(); playbackWrite.pending = body;
+    if (synchronous) {
+      // Loopback only. Flush before native exit destroys the WebView/core.
+      // Sequence numbers stop an older asynchronous write replacing this one.
+      xhr = new XMLHttpRequest(); xhr.open("PUT", "/api/playback", false); xhr.setRequestHeader("Content-Type", "application/json");
+      try { xhr.send(body); if (xhr.status >= 200 && xhr.status < 300) playbackWrite.pending = null; } catch (ignore) {}
+    } else flushPlaybackWrite();
+  }
+  function flushPlaybackWrite() {
+    var body, settled = false;
+    if (playbackWrite.inFlight || !playbackWrite.pending) return;
+    body = playbackWrite.pending; playbackWrite.pending = null; playbackWrite.inFlight = true;
+    api("/api/playback", "PUT", body, function (err) {
+      if (settled) return; settled = true; playbackWrite.inFlight = false;
+      if (err && !playbackWrite.pending) playbackWrite.pending = body;
+      if (!err && playbackWrite.pending) flushPlaybackWrite();
+    });
+  }
+  function loadPlayback() {
+    var revision = playbackWrite.revision, token = state.playToken;
+    api("/api/playback", "GET", null, function (err, data) {
+      var saved = data && data.snapshot;
+      if (err || !saved || !saved.track || state.current || token !== state.playToken || revision !== playbackWrite.revision) return;
+      state.playMode = saved.mode || "list"; state.playbackList = saved.list || []; state.playbackListSource = saved.listSource || "";
+      selectTrack(saved.track, saved.position || 0, saved.duration || 0);
+      setPlaybackStatus("paused"); renderPlayMode(); syncProgress();
+    });
+  }
   function focusRoot() { var modal = document.getElementById("modal-root"); return !modal.hidden ? modal : state.queueOpen ? document.getElementById("queue-popup") : state.playerOpen ? document.getElementById("player-overlay") : document; }
   function isFocusable(node) { return !!node && document.body.contains(node) && !node.disabled && node.getClientRects().length > 0 && window.getComputedStyle(node).visibility !== "hidden"; }
   function visibleFocusables(root) { var all = (root || document).querySelectorAll(".focusable"), visible = [], i; for (i = 0; i < all.length; i++) if (isFocusable(all[i])) visible.push(all[i]); return visible; }
@@ -134,7 +176,7 @@
     if (code !== 37 && code !== 38 && code !== 39 && code !== 40 && active.id !== "seek" && active.id !== "overlay-seek") return false;
     var ids = state.playerOpen ? ["player-repeat", "overlay-prev", "overlay-play", "overlay-next", "overlay-queue"] : ["now-playing", "play-mode", "prev", "play", "next", "queue-open"], index = ids.indexOf(active.id), target, comments = document.getElementById("overlay-comments"), comment = parentMatch(active, ".comment", comments), commentEntry = visibleFocusables(comments)[0] || comments, nodes, next;
     if (active.id === "seek" || active.id === "overlay-seek") {
-      if (code === 37 || code === 39) { seekTo((audio.currentTime || 0) + (code === 39 ? 5 : -5)); return true; }
+      if (code === 37 || code === 39) { seekTo(playbackPosition() + (code === 39 ? 5 : -5)); return true; }
       if (code === 13 || code === 23 || code === 66) return true;
       target = code === 40 ? document.getElementById(state.playerOpen ? "overlay-play" : "play") : (state.playerOpen ? document.getElementById("overlay-favorite") : resolveBookmark(content, focusMemory.footerReturn) || contentEntry());
     } else if (index >= 0) {
@@ -459,7 +501,7 @@
     side.innerHTML = '<div id="side-lyrics" class="lyrics focusable" tabindex="0" aria-label="歌词，可上下滚动">' + lyricMarkup() + '</div>';
     lyricsBox = document.getElementById("side-lyrics");
     if (lyricsBox) lyricsBox.scrollTop = lyricScroll; restoreBookmark(side, savedFocus);
-    updateLyrics(audio.currentTime || 0);
+    updateLyrics(playbackPosition());
   }
   function modeIcon(mode) {
     var attrs = 'viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
@@ -497,7 +539,7 @@
     if (!overlay) return;
     if (song) { title.textContent = songName(song); artistNode.textContent = artist(song); albumNode.textContent = album(song); coverNode.src = cover(song); }
     renderOverlayFavorite();
-    lyrics.innerHTML = lyricMarkup(); renderOverlayComments(comments, song); status.textContent = state.lyricLines.length ? "" : (song ? (state.lyricsLoaded ? "暂无歌词" : "正在加载歌词…") : "等待播放"); status.hidden = !!state.lyricLines.length; renderPlayMode(); updateCommentCount(); bindCommentScroll(comments); bindFocusScroll(comments); updateLyrics(audio.currentTime || 0); syncCommentMotion();
+    lyrics.innerHTML = lyricMarkup(); renderOverlayComments(comments, song); status.textContent = state.lyricLines.length ? "" : (song ? (state.lyricsLoaded ? "暂无歌词" : "正在加载歌词…") : "等待播放"); status.hidden = !!state.lyricLines.length; renderPlayMode(); updateCommentCount(); bindCommentScroll(comments); bindFocusScroll(comments); updateLyrics(playbackPosition()); syncCommentMotion();
   }
   function scrollLyricIntoView(active) {
     var container, target, max, activeRect, containerRect;
@@ -555,16 +597,53 @@
     return items;
   }
   function playRelative(direction) { var items = playbackItems(), index = -1, i; if (!items.length) return; if (state.current) for (i = 0; i < items.length; i++) if (String(items[i].id) === String(state.current.id)) { index = i; break; } if (index < 0) index = direction > 0 ? -1 : items.length; play(items[(index + direction + items.length) % items.length]); }
-  function play(song) {
-    var token, directSource;
-    if (!song) return;
-    state.current = song; state.playToken += 1; token = state.playToken; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0; setPlaybackStatus("preparing"); audio.pause();
-    document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderSidePanel(); renderPlayerOverlay(); rememberRecent(song);
-    directSource = song.audioPath || song.audioUrl || song.audio_url;
-    if (directSource) setAudioSource(directSource); else api("/api/music/url", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=wy", function (err, data) { var source = data && data.data, status; if (token !== state.playToken) return; if (err || !source) { setPlaybackStatus("failed"); status = document.getElementById("lyric-status"); status.textContent = "播放地址获取失败"; status.hidden = false; return; } setAudioSource(source); });
-    loadLyricsComments(song, token);
+  function selectTrack(song, position, duration) {
+    audio.pause(); audio.removeAttribute("src"); audio.load();
+    playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
+    state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
+    document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderSidePanel(); renderPlayerOverlay(); syncProgress();
+    loadLyricsComments(song, state.playToken);
   }
-  function setAudioSource(source) { var token = state.playToken; audio.pause(); setPlaybackStatus("preparing"); audio.src = "/media?url=" + encodeURIComponent(source); audio.load(); var promise = audio.play(); if (promise && promise.catch) promise.catch(function () { if (token === state.playToken) setPlaybackStatus("failed"); }); }
+  function play(song) {
+    if (!song) return;
+    selectTrack(song, 0, 0); rememberRecent(song); savePlayback(); togglePlayback();
+  }
+  function resolveCurrentSource() {
+    var song = state.current, token = state.playToken, directSource;
+    if (!song || playback.resolving) return;
+    playback.resolving = true; setPlaybackStatus("preparing");
+    directSource = song.audioPath || song.audioUrl || song.audio_url;
+    if (directSource) setAudioSource(directSource); else api("/api/music/url", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=" + encodeURIComponent(song.type || song.provider || "wy"), function (err, data) { var source = data && data.data, status; if (token !== state.playToken) return; playback.resolving = false; if (err || !source) { playback.wantPlay = false; setPlaybackStatus("failed"); status = document.getElementById("lyric-status"); status.textContent = "播放地址获取失败"; status.hidden = false; return; } setAudioSource(source); });
+  }
+  function applyPendingSeek() {
+    var target, i, seekable = false;
+    if (playback.pendingSeek == null) return true;
+    if (!playback.sourceReady || !playback.duration) return false;
+    target = Math.min(playback.pendingSeek, Math.max(0, playback.duration - .1));
+    if (!audio.seeking && Math.abs(audio.currentTime - target) < .1) { playback.position = target; playback.pendingSeek = null; return true; }
+    for (i = 0; i < audio.seekable.length; i++) if (audio.seekable.start(i) <= target && audio.seekable.end(i) >= target) seekable = true;
+    // loadedmetadata can precede a seekable range, especially with older WebViews.
+    if (seekable && !audio.seeking) { try { audio.currentTime = target; } catch (ignore) {} }
+    return false;
+  }
+  function startAudio() {
+    var token = state.playToken, promise;
+    if (!applyPendingSeek()) return;
+    promise = audio.play();
+    if (promise && promise.catch) promise.catch(function () { if (token === state.playToken && playback.wantPlay) { playback.wantPlay = false; setPlaybackStatus("failed"); } });
+  }
+  function togglePlayback() {
+    if (!state.current) return;
+    if (!audio.paused || playback.wantPlay) { playback.wantPlay = false; audio.pause(); setPlaybackStatus("paused"); savePlayback(); return; }
+    playback.wantPlay = true;
+    if (playback.needsSource) resolveCurrentSource();
+    else if (playback.sourceReady) startAudio();
+    else setPlaybackStatus("preparing");
+  }
+  function setAudioSource(source) {
+    playback.resolving = false; playback.needsSource = false; playback.sourceReady = false;
+    setPlaybackStatus(playback.wantPlay ? "preparing" : "paused"); audio.src = "/media?url=" + encodeURIComponent(source); audio.load();
+  }
   function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), close; if (!state.current || !overlay) return; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); close = document.getElementById("player-close"); if (close) close.focus(); }
   function queuePopupMarkup(items) {
     var html = "", i, song, actions, favorite;
@@ -608,7 +687,7 @@
   function openQueuePopup() { var popup = document.getElementById("queue-popup"); if (!state.playerOpen || !popup) return; state.queuePreviousFocus = document.activeElement; state.queueOpen = true; popup.hidden = false; syncCommentMotion(); renderQueuePopup(); }
   function closeQueuePopup() { var popup = document.getElementById("queue-popup"), previous = state.queuePreviousFocus, fallback; if (!popup) return; state.queueOpen = false; popup.hidden = true; state.queuePreviousFocus = null; fallback = document.getElementById("overlay-queue"); if (previous && previous.focus && document.body.contains(previous) && !previous.hidden) previous.focus(); else if (fallback) fallback.focus(); syncCommentMotion(); }
   function closePlayerOverlay() { var overlay = document.getElementById("player-overlay"), previous = state.playerPreviousFocus; if (!overlay) return; if (state.queueOpen) closeQueuePopup(); state.playerOpen = false; overlay.hidden = true; stopCommentMotion(); state.playerPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else focusInitial(); }
-  function cyclePlayMode() { state.playMode = state.playMode === "list" ? "one" : (state.playMode === "one" ? "shuffle" : "list"); renderPlayMode(); if (state.playerOpen) renderPlayerOverlay(); }
+  function cyclePlayMode() { state.playMode = state.playMode === "list" ? "one" : (state.playMode === "one" ? "shuffle" : "list"); renderPlayMode(); if (state.playerOpen) renderPlayerOverlay(); savePlayback(); }
   function playRandom() { var items = playbackItems(), candidates = [], current = state.current, i; for (i = 0; i < items.length; i++) if (!current || String(items[i].id) !== String(current.id)) candidates.push(items[i]); if (!candidates.length) candidates = items; if (candidates.length) play(candidates[Math.floor(Math.random() * candidates.length)]); }
   function handleEnded() { if (state.playbackListSource === "queue" && !state.queue.some(function (song) { return sameSong(song, state.current); })) { playRelative(1); return; } if (state.playMode === "one") { audio.currentTime = 0; var replay = audio.play(); if (replay && replay.catch) replay.catch(function () {}); return; } if (state.playMode === "shuffle") { playRandom(); return; } playRelative(1); }
   function applyLibrary(data) { if (!data) return; state.favorites = data.favorites || []; state.queue = data.playlists || []; state.recent = data.recent || []; state.authenticated = !!data.authenticated; state.librarySynced = !!data.synced; document.getElementById("queue-count").textContent = state.queue.length; renderQueueButton(); updateTrackStates(); }
@@ -743,15 +822,15 @@
     if (state.playerOpen) { closePlayerOverlay(); return true; }
     if (state.detailReturn) { var back = state.detailReturn; renderPage(back.page); state.returnPlaylist = {id: back.id, page: back.page, anchor: document.activeElement}; restorePlaylistReturn(content); return true; }
     if (state.page !== "recommend") { renderPage("recommend"); document.getElementById("nav-recommend").focus(); return true; }
-    return false;
+    savePlayback(true); playback.wantPlay = false; audio.pause(); return false;
   }
   window.MingmingTVBack = handleBack;
-  window.MingmingTVBackground = function () { commentMotion.background = true; stopCommentMotion(); if (state.scan) closeScan(); };
+  window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) closeScan(); };
   window.MingmingTVForeground = function () { commentMotion.background = false; syncCommentMotion(); };
   document.addEventListener("visibilitychange", function () { if (document.hidden) window.MingmingTVBackground(); else window.MingmingTVForeground(); });
   window.addEventListener("pageshow", window.MingmingTVForeground);
   window.addEventListener("resize", syncCommentMotion);
-  window.addEventListener("pagehide", function () { commentMotion.background = true; stopCommentMotion(); if (state.scan) { closeScan(); var xhr = new XMLHttpRequest(); xhr.open("POST", "/api/scan/cancel", false); try { xhr.send(); } catch (ignore) {} } });
+  window.addEventListener("pagehide", function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) { closeScan(); var xhr = new XMLHttpRequest(); xhr.open("POST", "/api/scan/cancel", false); try { xhr.send(); } catch (ignore) {} } });
 
   function logout() {
     var message = document.getElementById("account-message"), button = document.getElementById("account-logout");
@@ -776,19 +855,22 @@
   document.getElementById("overlay-next").addEventListener("click", function () { playRelative(1); });
   document.getElementById("overlay-queue").addEventListener("click", openQueuePopup);
   document.getElementById("overlay-favorite").addEventListener("click", function () { toggleFavorite(state.current); });
-  document.getElementById("overlay-play").addEventListener("click", function () { if (audio.paused) audio.play(); else audio.pause(); });
+  document.getElementById("overlay-play").addEventListener("click", togglePlayback);
   document.getElementById("prev").addEventListener("click", function () { playRelative(-1); });
   document.getElementById("next").addEventListener("click", function () { playRelative(1); });
-  document.getElementById("play").addEventListener("click", function () { if (audio.paused) audio.play(); else audio.pause(); });
+  document.getElementById("play").addEventListener("click", togglePlayback);
   function seekTo(time) {
-    if (!isFinite(audio.duration) || audio.duration <= 0) return;
-    time = Math.max(0, Math.min(audio.duration, time));
-    audio.currentTime = time; syncProgress(time); updateLyrics(time);
+    var duration = playbackDuration();
+    if (!isFinite(time) || !duration) return;
+    time = Math.max(0, Math.min(duration, time));
+    playback.position = time;
+    if (playback.sourceReady) audio.currentTime = time; else playback.pendingSeek = time;
+    syncProgress(time); updateLyrics(time); savePlayback();
   }
   function finishSeek() {
     var input = state.seekInput, time;
     if (!input) return;
-    time = audio.duration * parseFloat(input.value) / 100;
+    time = playbackDuration() * parseFloat(input.value) / 100;
     state.seekInput = null;
     if (isFinite(time)) seekTo(time); else syncProgress();
   }
@@ -797,11 +879,11 @@
     input.addEventListener("mousedown", begin);
     input.addEventListener("touchstart", begin);
     input.addEventListener("input", function () {
-      var time = audio.duration * parseFloat(input.value) / 100;
+      var time = playbackDuration() * parseFloat(input.value) / 100;
       if (!isFinite(time)) return;
       if (state.seekInput === input) syncProgress(time); else seekTo(time);
     });
-    input.addEventListener("change", function () { if (state.seekInput) finishSeek(); else seekTo(audio.duration * parseFloat(input.value) / 100); });
+    input.addEventListener("change", function () { if (state.seekInput) finishSeek(); else seekTo(playbackDuration() * parseFloat(input.value) / 100); });
     input.addEventListener("blur", finishSeek);
   }
   bindSeek(document.getElementById("seek")); bindSeek(document.getElementById("overlay-seek"));
@@ -810,30 +892,37 @@
   document.addEventListener("touchcancel", finishSeek);
   function syncPlaybackVisuals(playing) { document.getElementById("player-cover").classList.toggle("is-playing", playing); document.getElementById("overlay-cover").classList.toggle("is-playing", playing); }
   function syncProgress(previewTime) {
-    var seek = document.getElementById("seek"), overlaySeek = document.getElementById("overlay-seek"), hasDuration = isFinite(audio.duration) && audio.duration > 0, time = typeof previewTime === "number" ? previewTime : (audio.currentTime || 0), percent, elapsed, duration, sliders = [seek, overlaySeek], i;
-    if (state.seekInput && typeof previewTime !== "number" && hasDuration) time = audio.duration * parseFloat(state.seekInput.value) / 100;
-    percent = hasDuration ? Math.max(0, Math.min(100, time / audio.duration * 100)) : 0;
+    var seek = document.getElementById("seek"), overlaySeek = document.getElementById("overlay-seek"), total = playbackDuration(), hasDuration = total > 0, time = typeof previewTime === "number" ? previewTime : playbackPosition(), percent, elapsed, duration, sliders = [seek, overlaySeek], i;
+    if (state.seekInput && typeof previewTime !== "number" && hasDuration) time = total * parseFloat(state.seekInput.value) / 100;
+    percent = hasDuration ? Math.max(0, Math.min(100, time / total * 100)) : 0;
     for (i = 0; i < sliders.length; i++) {
       sliders[i].value = percent;
       sliders[i].style.backgroundImage = "linear-gradient(to right,#c7f38d " + percent + "%,#405244 " + percent + "%)";
     }
-    elapsed = fmt(time); duration = hasDuration ? fmt(audio.duration) : "00:00";
+    elapsed = fmt(time); duration = hasDuration ? fmt(total) : "00:00";
     document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("player-duration").textContent = duration;
     document.getElementById("overlay-elapsed").textContent = elapsed; document.getElementById("overlay-duration").textContent = duration;
   }
   function setPlaybackStatus(status) { state.playbackStatus = status; setPlaybackButtonState(!audio.paused && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
-  audio.addEventListener("playing", function () { setPlaybackStatus("playing"); });
+  audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });
   audio.addEventListener("seeking", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });
-  audio.addEventListener("seeked", function () { if (!audio.paused && audio.readyState >= 3) setPlaybackStatus("playing"); });
-  audio.addEventListener("pause", function () { setPlaybackStatus("paused"); });
-  audio.addEventListener("error", function () { setPlaybackStatus("failed"); });
-  audio.addEventListener("loadedmetadata", function () { if (state.current && isFinite(audio.duration) && audio.duration > 0) state.current.dt = audio.duration * 1000; syncProgress(); updateTrackStates(); });
-  audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(audio.currentTime || 0); });
+  audio.addEventListener("seeked", function () { if (applyPendingSeek() && playback.wantPlay && audio.paused) startAudio(); if (!audio.paused && audio.readyState >= 3) setPlaybackStatus("playing"); syncProgress(); });
+  audio.addEventListener("pause", function () { if (playback.sourceReady) { setPlaybackStatus("paused"); savePlayback(); } });
+  audio.addEventListener("error", function () { if (audio.getAttribute("src")) { playback.position = playbackPosition(); playback.sourceReady = false; playback.needsSource = true; playback.wantPlay = false; playback.pendingSeek = playback.position; setPlaybackStatus("failed"); } });
+  audio.addEventListener("loadedmetadata", function () {
+    if (!state.current || !audio.getAttribute("src") || audio.readyState < 1) return;
+    if (isFinite(audio.duration) && audio.duration > 0) { playback.duration = audio.duration; state.current.dt = audio.duration * 1000; }
+    playback.sourceReady = true; applyPendingSeek(); syncProgress(); updateLyrics(playbackPosition()); updateTrackStates();
+    if (playback.wantPlay) startAudio(); else setPlaybackStatus("paused");
+  });
+  function mediaCanSeek() { if (!playback.sourceReady) return; applyPendingSeek(); if (playback.wantPlay && audio.paused) startAudio(); }
+  audio.addEventListener("canplay", mediaCanSeek); audio.addEventListener("progress", mediaCanSeek);
+  audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(playbackPosition()); if (playback.sourceReady && !audio.paused && Date.now() - playbackWrite.lastSave >= 5000) savePlayback(); });
   audio.addEventListener("ended", function () { setPlaybackStatus("ended"); handleEnded(); });
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
   document.addEventListener("keydown", function (e) { if (e.keyCode === 27 || e.keyCode === 4) { if (handleBack()) e.preventDefault(); return; } if (e.keyCode === 37 || e.keyCode === 38 || e.keyCode === 39 || e.keyCode === 40 || e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 66) { e.preventDefault(); moveFocus(e.keyCode); } });
 
-  renderControlIcons(); renderPlayMode(); loadSearchHistory(); api("/health", "GET", null, function (err, data) { var dot = document.getElementById("connection-dot"), label = document.getElementById("connection-label"); if (!err && data) { dot.className = "status-dot ready"; label.textContent = data.capabilities && data.capabilities.fixture ? "预览数据" : "在线音乐"; state.fixture = !!(data.capabilities && data.capabilities.fixture); } else label.textContent = "服务连接失败"; }); loadLibrary(); renderPage("recommend"); focusInitial();
+  renderControlIcons(); renderPlayMode(); loadSearchHistory(); api("/health", "GET", null, function (err, data) { var dot = document.getElementById("connection-dot"), label = document.getElementById("connection-label"); if (!err && data) { dot.className = "status-dot ready"; label.textContent = data.capabilities && data.capabilities.fixture ? "预览数据" : "在线音乐"; state.fixture = !!(data.capabilities && data.capabilities.fixture); } else label.textContent = "服务连接失败"; }); loadLibrary(); loadPlayback(); renderPage("recommend"); focusInitial();
 }());
