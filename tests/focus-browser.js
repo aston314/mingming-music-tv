@@ -14,12 +14,17 @@ async function seedFocusAudit() {
 async function installFocusAudit() {
   var health = await (await fetch('/health')).json();
   if (!health.capabilities.fixture) throw new Error('Focus audit requires an isolated fixture preview');
-  window.focusAudit = {checks: 0, errors: [], requests: [], delayDetail: false, delayReturn: false, failAppend: false};
+  window.focusAudit = {checks: 0, errors: [], requests: [], libraryWrites: 0, delayDetail: false, delayReturn: false, failAppend: false};
   var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method, url) { this.auditURL = url; return open.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function (body) {
     var xhr = this, url = xhr.auditURL || '', response, delay = 35, params = new URLSearchParams(body || ''), audit = window.focusAudit;
     audit.requests.push({url: url, body: body});
+    if (url === '/api/library' && body) {
+      var handler = xhr.onreadystatechange, settled = false;
+      audit.libraryWrites++;
+      xhr.onreadystatechange = function () { if (xhr.readyState === 4 && !settled) { settled = true; audit.libraryWrites--; } if (handler) handler(); };
+    }
     if (url === '/api/music/search') {
       var page = Number(params.get('page')) || 1, count = page === 1 ? 30 : 17;
       response = {data: Array.from({length: count}, function (_, i) {return {id: 'search-' + ((page - 1) * 30 + i), name: '搜索歌曲 ' + ((page - 1) * 30 + i), artist: '测试歌手', dt: 180000, picUrl: '/focus-cover.svg'};}), more: page === 1}; delay = page > 1 ? 180 : 50;
@@ -33,6 +38,7 @@ async function installFocusAudit() {
     setTimeout(function () { Object.defineProperty(xhr,'readyState',{value:4});Object.defineProperty(xhr,'status',{value:(url === '/api/music/search' && Number(params.get('page'))>1 && audit.failAppend) ? 500 : 200});Object.defineProperty(xhr,'responseText',{value:JSON.stringify(response)});if(xhr.onreadystatechange)xhr.onreadystatechange(); },delay);
   };
   window.auditWait = function(ms) {return new Promise(function(resolve){setTimeout(resolve,ms||100);});};
+  window.auditUntil = async function (ready) { var deadline = Date.now() + 5000; while (!ready()) { if (Date.now() >= deadline) throw new Error('Fixture operation did not settle'); await auditWait(20); } };
   window.auditLabel = function(e) {return e && (e.id || e.getAttribute('data-focus') || e.getAttribute('data-track-id') || e.getAttribute('data-action') || e.getAttribute('data-playlist-id') || e.getAttribute('data-search-history') || e.textContent.trim().slice(0,28));};
   window.auditCheck = function(ok,label,extra){focusAudit.checks++;if(!ok)focusAudit.errors.push({label:label,extra:extra});};
   window.auditFocus = function(selector){var e=typeof selector === 'string'?document.querySelector(selector):selector;if(!e)throw new Error('Missing target: '+selector);var row=e.closest('.track-row');if(row)row.focus();e.focus();return e;};
@@ -124,27 +130,27 @@ async function runFocusAudit(stage) {
     auditCheck(document.querySelector(heroSelector).getAttribute('aria-pressed')==='true','queued hero initially shows delete');
     auditFocus(heroSelector);document.activeElement.click();
     auditCheck(document.activeElement.matches(heroSelector),'hero toggle preserves hero focus');
-    auditCheck(document.querySelector(heroSelector).getAttribute('aria-pressed')==='false'&&document.querySelector(duplicateSelector).getAttribute('aria-pressed')==='false','removing hero syncs duplicate add icons');await auditWait(100);
+    auditCheck(document.querySelector(heroSelector).getAttribute('aria-pressed')==='false'&&document.querySelector(duplicateSelector).getAttribute('aria-pressed')==='false','removing hero syncs duplicate add icons');await auditUntil(function(){return a.libraryWrites===0;});
     var plusIcon=document.querySelector(duplicateSelector).innerHTML;
     auditFocus(duplicateSelector);document.activeElement.click();
     auditCheck(document.activeElement.matches(duplicateSelector),'duplicate toggle keeps regular row focus');
-    auditCheck(document.querySelector(heroSelector).getAttribute('aria-pressed')==='true'&&document.querySelector(duplicateSelector).innerHTML!==plusIcon,'adding duplicate syncs delete icons');await auditWait(100);
+    auditCheck(document.querySelector(heroSelector).getAttribute('aria-pressed')==='true'&&document.querySelector(duplicateSelector).innerHTML!==plusIcon,'adding duplicate syncs delete icons');await auditUntil(function(){return a.libraryWrites===0;});
     var send=XMLHttpRequest.prototype.send, writes=0, activeWrites=0, maxWrites=0, title=document.getElementById('player-title').textContent;
-    XMLHttpRequest.prototype.send=function(body){var xhr=this;if(xhr.auditURL==='/api/library'&&body){writes++;activeWrites++;maxWrites=Math.max(maxWrites,activeWrites);var handler=xhr.onreadystatechange;xhr.onreadystatechange=function(){if(xhr.readyState===4)activeWrites--;if(handler)handler();};setTimeout(function(){send.call(xhr,body);},writes===1?350:40);}else return send.apply(this,arguments);};
+    XMLHttpRequest.prototype.send=function(body){var xhr=this;if(xhr.auditURL==='/api/library'&&body){writes++;activeWrites++;maxWrites=Math.max(maxWrites,activeWrites);var handler=xhr.onreadystatechange,settled=false;xhr.onreadystatechange=function(){if(xhr.readyState===4&&!settled){settled=true;activeWrites--;}if(handler)handler();};setTimeout(function(){send.call(xhr,body);},writes===1?350:40);}else return send.apply(this,arguments);};
     try {
       auditFocus(duplicateSelector);document.activeElement.click();document.activeElement.click();
       auditCheck(document.activeElement.matches(duplicateSelector)&&document.activeElement.getAttribute('aria-pressed')==='true','rapid remove/add updates in place');
-      await auditWait(600);
+      await auditUntil(function(){return activeWrites===0;});
       var stored=await(await fetch('/api/library')).json();
-      auditCheck(maxWrites===1&&writes===2,'library writes are serialized');
+      auditCheck(maxWrites===1&&writes===2,'library writes are serialized',{maxWrites:maxWrites,writes:writes});
       auditCheck(stored.playlists.filter(function(s){return String(s.id)===songID;}).length===1,'rapid toggle persists one queued song');
       auditCheck(document.querySelector(duplicateSelector).getAttribute('aria-pressed')==='true','late save cannot revert latest icon');
       auditCheck(document.getElementById('player-title').textContent===title,'queue toggle does not start playback');
     } finally {XMLHttpRequest.prototype.send=send;}
     auditFocus(duplicateSelector);auditMove(21);auditCheck(document.activeElement.classList.contains('track-row'),'toggle left returns its row');auditMove(22);auditCheck(document.activeElement.matches(duplicateSelector),'row right returns toggle');
-    auditFocus('.track-list .track-row:first-child [data-action="favorite"]');if(document.activeElement.getAttribute('aria-pressed')!=='true')document.activeElement.click();await auditWait(100);page('favorites');
+    auditFocus('.track-list .track-row:first-child [data-action="favorite"]');if(document.activeElement.getAttribute('aria-pressed')!=='true')document.activeElement.click();await auditUntil(function(){return a.libraryWrites===0;});page('favorites');
     var favoriteQueue=document.querySelector('[data-track-id="'+songID+'"] [data-action="queue"]');auditCheck(favoriteQueue.getAttribute('aria-pressed')==='true','favorite list restores queued delete state');
-    auditFocus(favoriteQueue);favoriteQueue.click();auditCheck(favoriteQueue.getAttribute('aria-pressed')==='false'&&document.activeElement===favoriteQueue,'favorite list can remove queue without losing focus');await auditWait(100);
+    auditFocus(favoriteQueue);favoriteQueue.click();auditCheck(favoriteQueue.getAttribute('aria-pressed')==='false'&&document.activeElement===favoriteQueue,'favorite list can remove queue without losing focus');await auditUntil(function(){return a.libraryWrites===0;});
     stored=await(await fetch('/api/library')).json();auditCheck(!stored.playlists.some(function(s){return String(s.id)===songID;}),'queue removal is persisted');auditCheck(stored.favorites.some(function(s){return String(s.id)===songID;}),'queue removal preserves favorite');
   } else if(stage==='failures') {
     page('search');await auditWait();document.getElementById('search-input').value='分页失败检查';document.getElementById('search-form').dispatchEvent(new Event('submit',{cancelable:true}));await auditWait(100);
