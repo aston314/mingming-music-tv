@@ -81,6 +81,7 @@ public final class MainActivity extends Activity {
         if (isShield && dm.widthPixels / dm.density <= 1000) {
             web.getSettings().setUseWideViewPort(true);
             web.getSettings().setLoadWithOverviewMode(true);
+            web.setInitialScale(100);
         }
         web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(false);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
