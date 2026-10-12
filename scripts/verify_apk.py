@@ -46,7 +46,9 @@ def verify(apk, debug=False):
     signer = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
     digest = re.search(r'certificate SHA-256 digest: ([a-fA-F0-9]+)', signer).group(1).lower()
     if not debug:
-        assert digest == config['signingCertificateSha256'], 'unexpected release signer'
+        assert digest == config['signingCertificateSha256'], (
+            'unexpected release signer: actual=' + digest
+            + ', expected=' + config['signingCertificateSha256'])
     return {'apk': apk.name, 'bytes': apk.stat().st_size,
             'sha256': hashlib.sha256(apk.read_bytes()).hexdigest(), 'core_version': version,
             'abis': embedded, 'embedded_ui_matches': True, 'product_matches': True,
