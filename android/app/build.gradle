@@ -1,0 +1,40 @@
+import groovy.json.JsonSlurper
+plugins { id "com.android.application" }
+def product = new JsonSlurper().parse(file("../../app.json"))
+def releaseStore = System.getenv("ANDROID_KEYSTORE_FILE")
+android {
+    namespace product.applicationId
+    compileSdk 35
+    defaultConfig {
+        applicationId product.applicationId
+        minSdk product.minSdk
+        targetSdk 35
+        versionCode product.versionCode
+        versionName product.versionName
+        resValue "string", "app_name", product.displayName
+        buildConfigField "String", "CORE_VERSION", "\"${System.getenv('MINGMING_CORE_VERSION') ?: product.versionName + '-dev'}\""
+        ndk { abiFilters.addAll(product.abis) }
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            if (releaseStore) {
+                storeFile file(releaseStore)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                storeType "PKCS12"
+            }
+        }
+    }
+    buildTypes {
+        debug { applicationIdSuffix ".debug"; versionNameSuffix "-debug" }
+        release {
+            minifyEnabled false
+            if (releaseStore) signingConfig signingConfigs.release
+        }
+    }
+    packaging { jniLibs { useLegacyPackaging = true } }
+    testOptions { unitTests.returnDefaultValues = true }
+}
+dependencies { testImplementation "junit:junit:4.13.2" }

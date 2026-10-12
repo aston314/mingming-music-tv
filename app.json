@@ -1,0 +1,21 @@
+{
+  "productId": "mingming-music-tv",
+  "displayName": "明明音乐",
+  "applicationId": "com.aston.mingmingmusic",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "platform": "Android TV",
+  "minSdk": 23,
+  "abis": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86_64"
+  ],
+  "privateRepository": "aston314/mingming-music-tv",
+  "publicReleaseRepository": null,
+  "updateEndpoint": null,
+  "upstream": "https://music.lzmhhh.com",
+  "playerAdapter": "webview-range-proxy",
+  "stage": "release",
+  "signingCertificateSha256": "6d29b1bbfa883ac9f4434806c1500793c994df44e4b758385c39e43755fd6b22"
+}

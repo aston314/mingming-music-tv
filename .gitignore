@@ -1,0 +1,15 @@
+.DS_Store
+android/.gradle/
+android/app/build/
+android/app/src/main/jniLibs/
+*.apk
+*.aab
+*.token
+.idea/
+__pycache__/
+node_modules/
+android/build/
+android/local.properties
+*.keystore
+*.p12
+dist/

@@ -1,0 +1,85 @@
+name: Build signed APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: mingming-signed-release
+      cancel-in-progress: false
+    env:
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Build identity and required secrets
+        run: |
+          for name in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!name}" || { echo "Release signing secret missing: $name" >&2; exit 1; }
+          done
+          python3 - <<'PY'
+          import json,os
+          config=json.load(open('app.json'))
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('MINGMING_CORE_VERSION='+config['versionName']+'-'+os.environ['GITHUB_SHA']+'\n')
+          PY
+      - name: Core, UI and browser checks
+        run: |
+          python3 scripts/validate_tv_app.py .
+          go test -race ./...
+          go vet ./...
+          npm ci --ignore-scripts
+          npm run check
+          npx playwright install --with-deps chromium
+          npm run test:browser
+      - name: Android SDK and NDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+      - name: Embedded Android executables
+        run: bash scripts/build_android_binaries.sh
+      - name: Restore dedicated release key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo 'Release keystore is missing' >&2; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mingming-release.p12"
+          chmod 600 "$RUNNER_TEMP/mingming-release.p12"
+      - name: Android unit tests, lint and signed release APK
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/mingming-release.p12
+        run: gradle -p android testReleaseUnitTest lintRelease assembleRelease
+      - name: Verify and prepare exact signed bytes
+        run: |
+          python3 scripts/verify_apk.py android/app/build/outputs/apk/release/app-release.apk
+          python3 scripts/generate_release.py --apk android/app/build/outputs/apk/release/app-release.apk --out "$RUNNER_TEMP/mingming-release"
+      - name: Publish private Release with APK, update.json and SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_release.py --directory "$RUNNER_TEMP/mingming-release" --commit "$GITHUB_SHA"
+      - name: Clean signing key
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os,pathlib
+          pathlib.Path(os.environ['RUNNER_TEMP'],'mingming-release.p12').unlink(missing_ok=True)
+          PY

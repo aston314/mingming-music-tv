@@ -1,0 +1,48 @@
+name: Build and verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Checks and browser focus regression
+        run: |
+          python3 scripts/validate_tv_app.py .
+          go test -race ./...
+          go vet ./...
+          npm ci --ignore-scripts
+          npm run check
+          npx playwright install --with-deps chromium
+          npm run test:browser
+      - name: Android SDK and NDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
+      - name: Embedded Android executables
+        run: bash scripts/build_android_binaries.sh
+      - name: Android tests, lint and APK
+        run: gradle -p android testDebugUnitTest lintDebug assembleDebug
+      - name: Verify packaged code and SHA256
+        run: python3 scripts/verify_apk.py android/app/build/outputs/apk/debug/app-debug.apk --debug
