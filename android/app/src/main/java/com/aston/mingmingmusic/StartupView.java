@@ -111,7 +111,8 @@ final class StartupView extends LinearLayout {
                 float sweep = 75f + 75f * (float) Math.sin(phase * Math.PI);
                 canvas.drawArc(ring, phase * 360f - 90f, sweep, false, paint);
             }
-            int half = Math.round(size * .36f);
+            // Leave space between the square logo's corners and the round ring.
+            int half = Math.round(size * .28f);
             drawable.setBounds(Math.round(cx) - half, Math.round(cy) - half, Math.round(cx) + half, Math.round(cy) + half);
             drawable.draw(canvas);
         }

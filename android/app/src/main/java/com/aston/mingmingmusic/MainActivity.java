@@ -15,6 +15,7 @@ import android.webkit.WebViewClient;
 import android.webkit.ValueCallback;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.JavascriptInterface;
 import android.widget.FrameLayout;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -23,6 +24,7 @@ public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView web;
     private boolean ready, destroyed;
+    private boolean explicitExit;
     private int startupGeneration;
     private Thread startupWorker;
     private FrameLayout root;
@@ -81,10 +83,12 @@ public final class MainActivity extends Activity {
         if (isShield && dm.widthPixels / dm.density <= 1000) {
             web.getSettings().setUseWideViewPort(true);
             web.getSettings().setLoadWithOverviewMode(true);
-            web.setInitialScale(100);
+            web.setInitialScale(150);
         }
         web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(false);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        web.addJavascriptInterface(new MusicBridge(), "MingmingNativePlayer");
+        web.addJavascriptInterface(new AppBridge(), "MingmingTVApp");
         web.setWebViewClient(new WebViewClient() {
             private boolean failed;
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) { return !url.startsWith(endpoint.url); }
@@ -103,11 +107,27 @@ public final class MainActivity extends Activity {
         } }, 30000);
     }
     @Override public boolean dispatchKeyEvent(KeyEvent event) { if (ready && web != null && event.getAction() == KeyEvent.ACTION_DOWN) { int code = event.getKeyCode(); if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) { web.evaluateJavascript("window.MingmingTVKey&&window.MingmingTVKey(" + code + ");", null); return true; } } return super.dispatchKeyEvent(event); }
+    private static final class MusicBridge {
+        @JavascriptInterface public String read() { return CoreService.playbackState(); }
+        @JavascriptInterface public void command(String operation, String payload) { CoreService.playerCommand(operation, payload); }
+    }
+    private final class AppBridge {
+        @JavascriptInterface public void exit() {
+            runOnUiThread(new Runnable() { @Override public void run() {
+                if (destroyed) return;
+                explicitExit = true;
+                // The service pauses, checkpoints and stops its own foreground
+                // notification before the Activity is torn down.
+                CoreService.exitPlayback();
+                finish();
+            } });
+        }
+    }
     @Override protected void onResume() { super.onResume(); immersive(); if (startup != null) startup.resumeAnimation(); if (web != null) { web.onResume(); web.evaluateJavascript("window.MingmingTVForeground&&window.MingmingTVForeground()", null); } }
     @Override public void onBackPressed() {
-        if (!ready || web == null) { super.onBackPressed(); return; }
+        if (!ready || web == null) { explicitExit = true; CoreService.exitPlayback(); super.onBackPressed(); return; }
         web.evaluateJavascript("window.MingmingTVBack?window.MingmingTVBack():false", new ValueCallback<String>() {
-            @Override public void onReceiveValue(String handled) { if (!"true".equals(handled)) MainActivity.super.onBackPressed(); }
+            @Override public void onReceiveValue(String handled) { if (!"true".equals(handled)) { explicitExit = true; CoreService.exitPlayback(); MainActivity.super.onBackPressed(); } }
         });
     }
     private void cancelPhoneInput() {
@@ -122,6 +142,6 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) {} finally { if (connection != null) connection.disconnect(); }
         } }, "mingming-phone-cancel").start();
     }
-    @Override protected void onPause() { cancelPhoneInput(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.evaluateJavascript("window.MingmingTVBackground&&window.MingmingTVBackground()", null); web.onPause(); } super.onPause(); }
-    @Override protected void onDestroy() { destroyed = true; startupGeneration++; if (startupWorker != null) startupWorker.interrupt(); handler.removeCallbacksAndMessages(null); if (startup != null) startup.pauseAnimation(); if (web != null) { web.destroy(); web = null; } if (isFinishing()) stopService(new Intent(this, CoreService.class)); super.onDestroy(); }
+    @Override protected void onPause() { cancelPhoneInput(); CoreService.backgroundPlayback(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.evaluateJavascript("window.MingmingTVBackground&&window.MingmingTVBackground()", null); web.onPause(); } super.onPause(); }
+    @Override protected void onDestroy() { destroyed = true; startupGeneration++; if (startupWorker != null) startupWorker.interrupt(); handler.removeCallbacksAndMessages(null); if (startup != null) startup.pauseAnimation(); if (web != null) { web.destroy(); web = null; } if (explicitExit) CoreService.exitPlayback(); super.onDestroy(); }
 }

@@ -110,6 +110,14 @@ async function runFocusAudit(stage) {
     MingmingTVBack();auditCheck(document.activeElement.id==='now-playing','fullscreen close restores origin');auditFocus('#side-lyrics');auditMove(21);auditCheck(document.getElementById('content').contains(document.activeElement),'side lyrics left returns content');
   } else if(stage==='queue-toggle') {
     auditCheck(document.activeElement.id==='nav-recommend'&&getComputedStyle(document.activeElement).outlineStyle==='solid','launch has visible default navigation focus');
+    MingmingTVBack();
+    auditCheck(!document.getElementById('modal-root').hidden&&document.activeElement.id==='exit-cancel','exit dialog defaults to cancel');
+    MingmingTVBack();
+    auditCheck(document.getElementById('modal-root').hidden&&document.activeElement.id==='nav-recommend','back cancels exit and restores focus');
+    MingmingTVBack();
+    auditCheck(!document.getElementById('modal-root').hidden&&document.activeElement.id==='exit-cancel','exit dialog can be reopened');
+    document.getElementById('exit-cancel').click();
+    auditCheck(document.getElementById('modal-root').hidden&&document.activeElement.id==='nav-recommend','cancel button restores focus');
     auditCheck(document.querySelector('.player-overlay-head').textContent.trim()==='正在播放'&&!document.getElementById('overlay-mode-label'),'fullscreen heading omits playback mode');
     page('queue');auditFocus('[data-library-tab="recent"]');document.activeElement.click();
     var heroSelector='#recent-current-track [data-action="queue"]', duplicateSelector='.track-list .track-row:first-child [data-action="queue"]', songID=document.getElementById('recent-current-track').getAttribute('data-track-id');

@@ -37,4 +37,7 @@ android {
     packaging { jniLibs { useLegacyPackaging = true } }
     testOptions { unitTests.returnDefaultValues = true }
 }
-dependencies { testImplementation "junit:junit:4.13.2" }
+dependencies {
+    implementation "androidx.media3:media3-exoplayer:1.5.1"
+    testImplementation "junit:junit:4.13.2"
+}

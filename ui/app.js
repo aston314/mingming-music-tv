@@ -9,10 +9,12 @@
     lyricsText: "", lyricLines: [], lyricIndex: -1, lyricsLoaded: false, comments: [], commentsLoaded: false,
     commentsPage: 0, commentsPageSize: 10, commentsTotal: 0, commentsMore: false, commentsLoading: false, commentsError: false, commentsRetryAt: 0,
     playbackStatus: "idle",
-    playerOpen: false, playerPreviousFocus: null, queueOpen: false, queuePreviousFocus: null, modalPreviousFocus: null, playMode: "list", playToken: 0,
+    playerOpen: false, playerPreviousFocus: null, queueOpen: false, queuePreviousFocus: null, modalPreviousFocus: null, exitDialog: false, playMode: "list", playToken: 0,
     searchQuery: "", searchPage: 0, searchPageSize: 30, searchMore: false, searchLoading: false, searchRequest: 0, searchHistory: [], seekInput: null, detailReturn: null, returnPlaylist: null, scan: null, scanGeneration: 0
   };
   var content = document.getElementById("content"), side = document.getElementById("side-panel"), audio = document.getElementById("audio");
+  var nativePlayer = window.MingmingNativePlayer && window.MingmingNativePlayer.command && window.MingmingNativePlayer.read ? window.MingmingNativePlayer : null;
+  var nativeSelection = 0, nativePendingSelection = 0;
   var commentMotion = {frame: null, last: 0, position: 0, scroll: 0, background: false, holdUntil: 0};
   var commentView = {token: -1, count: 0};
   var requestFrame = window.requestAnimationFrame ? function (fn) { return window.requestAnimationFrame(fn); } : function (fn) { return window.setTimeout(function () { fn(Date.now()); }, 32); };
@@ -38,8 +40,9 @@
   var libraryWrite = {inFlight: false, pending: false, revision: 0, callbacks: []};
   var playback = {position: 0, duration: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false};
   var playbackWrite = {clientId: String(Date.now()) + "-" + String(Math.random()).slice(2), sequence: 0, revision: 0, inFlight: false, pending: null, lastSave: 0};
-  function playbackPosition() { return playback.pendingSeek != null ? playback.pendingSeek : (playback.sourceReady ? (audio.currentTime || 0) : playback.position); }
-  function playbackDuration() { return playback.sourceReady && isFinite(audio.duration) && audio.duration > 0 ? audio.duration : playback.duration; }
+  function playbackPaused() { return nativePlayer ? !playback.wantPlay : audio.paused; }
+  function playbackPosition() { return nativePlayer ? playback.position : playback.pendingSeek != null ? playback.pendingSeek : (playback.sourceReady ? (audio.currentTime || 0) : playback.position); }
+  function playbackDuration() { return !nativePlayer && playback.sourceReady && isFinite(audio.duration) && audio.duration > 0 ? audio.duration : playback.duration; }
   function snapshotTrack(song) {
     var copy = {}, keys = ["id", "name", "title", "mainTitle", "artist", "album", "type", "provider", "source", "picUrl", "coverPath", "image", "pic", "pic_id", "dt", "duration", "interval", "time", "ar", "artists", "al"], i;
     for (i = 0; i < keys.length; i++) if (song[keys[i]] != null) copy[keys[i]] = song[keys[i]];
@@ -49,6 +52,7 @@
     var body, xhr;
     playbackWrite.revision += 1;
     if (!state.current) return;
+    if (nativePlayer) { nativePlayer.command("configure", JSON.stringify(nativeSnapshot())); return; }
     body = JSON.stringify({clientId: playbackWrite.clientId, sequence: ++playbackWrite.sequence, snapshot: {schema: 1, track: snapshotTrack(state.current), position: playbackPosition(), duration: playbackDuration(), mode: state.playMode, list: state.playbackList.slice(0, 500).map(snapshotTrack), listSource: state.playbackListSource}});
     playbackWrite.lastSave = Date.now(); playbackWrite.pending = body;
     if (synchronous) {
@@ -57,6 +61,23 @@
       xhr = new XMLHttpRequest(); xhr.open("PUT", "/api/playback", false); xhr.setRequestHeader("Content-Type", "application/json");
       try { xhr.send(body); if (xhr.status >= 200 && xhr.status < 300) playbackWrite.pending = null; } catch (ignore) {}
     } else flushPlaybackWrite();
+  }
+  function nativeSnapshot() { return {schema: 1, track: snapshotTrack(state.current), position: playback.position, duration: playback.duration, mode: state.playMode, list: playbackItems().slice(0, 500).map(snapshotTrack), listSource: state.playbackListSource, selectionTag: nativePendingSelection}; }
+  function refreshNativePlayback() {
+    var data, saved, changed;
+    if (!nativePlayer) return false;
+    try { data = JSON.parse(nativePlayer.read()); } catch (ignore) { return false; }
+    saved = data && data.snapshot;
+    if (!saved || !saved.track || (nativePendingSelection && data.selectionTag !== nativePendingSelection)) return false;
+    nativePendingSelection = 0;
+    changed = !state.current || !sameSong(state.current, saved.track);
+    state.playMode = saved.mode || "list"; state.playbackList = saved.list || []; state.playbackListSource = saved.listSource || "";
+    if (changed) { selectTrack(saved.track, saved.position, saved.duration, true); rememberRecent(saved.track); }
+    playback.position = saved.position || 0; playback.duration = saved.duration || 0; playback.pendingSeek = null;
+    playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
+    playback.resolving = data.state === "preparing";
+    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); updateTrackStates();
+    return true;
   }
   function flushPlaybackWrite() {
     var body, settled = false;
@@ -70,11 +91,15 @@
   }
   function loadPlayback() {
     var revision = playbackWrite.revision, token = state.playToken;
+    if (nativePlayer && refreshNativePlayback()) return;
     api("/api/playback", "GET", null, function (err, data) {
       var saved = data && data.snapshot;
       if (err || !saved || !saved.track || state.current || token !== state.playToken || revision !== playbackWrite.revision) return;
+      if (nativePlayer && refreshNativePlayback()) return;
       state.playMode = saved.mode || "list"; state.playbackList = saved.list || []; state.playbackListSource = saved.listSource || "";
-      selectTrack(saved.track, saved.position || 0, saved.duration || 0);
+      // Native playback is authoritative on an Android build; seed it with the
+      // persisted snapshot before the first play command.
+      selectTrack(saved.track, saved.position || 0, saved.duration || 0, false);
       setPlaybackStatus("paused"); renderPlayMode(); syncProgress();
     });
   }
@@ -455,7 +480,7 @@
   function holdCommentMotion() { commentMotion.holdUntil = Date.now() + 5000; }
   function canMoveComments() {
     var root = document.getElementById("overlay-comments");
-    return state.playerOpen && state.current && state.playbackStatus === "playing" && !audio.paused && !audio.ended && !document.hidden && !commentMotion.background && !state.queueOpen && document.getElementById("modal-root").hidden && root.clientHeight > 0 && !root.contains(document.activeElement);
+    return state.playerOpen && state.current && state.playbackStatus === "playing" && !playbackPaused() && (nativePlayer || !audio.ended) && !document.hidden && !commentMotion.background && !state.queueOpen && document.getElementById("modal-root").hidden && root.clientHeight > 0 && !root.contains(document.activeElement);
   }
   function stopCommentMotion() { if (commentMotion.frame !== null) cancelFrame(commentMotion.frame); commentMotion.frame = null; commentMotion.last = 0; }
   function syncCommentMotion() {
@@ -525,7 +550,7 @@
     return '<svg ' + attrs + '><path class="play-triangle" d="m9 5 10 7-10 7V5Z"/></svg>';
   }
   function setControlIcon(id, name, label) { var button = document.getElementById(id); if (!button) return; button.innerHTML = controlIcon(name); if (label) { button.title = label; button.setAttribute("aria-label", label); } }
-  function renderControlIcons() { setControlIcon("player-close", "close", "返回"); setControlIcon("prev", "prev", "上一首"); setControlIcon("play", audio.paused ? "play" : "pause", audio.paused ? "播放" : "暂停"); setControlIcon("next", "next", "下一首"); renderQueueButton(); setControlIcon("overlay-prev", "prev", "上一首"); setControlIcon("overlay-play", audio.paused ? "play" : "pause", audio.paused ? "播放" : "暂停"); setControlIcon("overlay-next", "next", "下一首"); setControlIcon("overlay-queue", "queue", "播放列表"); renderOverlayFavorite(); }
+  function renderControlIcons() { setControlIcon("player-close", "close", "返回"); setControlIcon("prev", "prev", "上一首"); setControlIcon("play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("next", "next", "下一首"); renderQueueButton(); setControlIcon("overlay-prev", "prev", "上一首"); setControlIcon("overlay-play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("overlay-next", "next", "下一首"); setControlIcon("overlay-queue", "queue", "播放列表"); renderOverlayFavorite(); }
   function renderOverlayFavorite() {
     var button = document.getElementById("overlay-favorite"), selected = isFavorite(state.current), label = selected ? "取消收藏" : "收藏歌曲";
     if (!button) return;
@@ -597,12 +622,13 @@
     return items;
   }
   function playRelative(direction) { var items = playbackItems(), index = -1, i; if (!items.length) return; if (state.current) for (i = 0; i < items.length; i++) if (String(items[i].id) === String(state.current.id)) { index = i; break; } if (index < 0) index = direction > 0 ? -1 : items.length; play(items[(index + direction + items.length) % items.length]); }
-  function selectTrack(song, position, duration) {
-    audio.pause(); audio.removeAttribute("src"); audio.load();
+  function selectTrack(song, position, duration, fromNative) {
+    if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
     playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
     state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
     document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderSidePanel(); renderPlayerOverlay(); syncProgress();
     loadLyricsComments(song, state.playToken);
+    if (nativePlayer && !fromNative) { nativePendingSelection = ++nativeSelection; nativePlayer.command("select", JSON.stringify(nativeSnapshot())); }
   }
   function play(song) {
     if (!song) return;
@@ -634,6 +660,7 @@
   }
   function togglePlayback() {
     if (!state.current) return;
+    if (nativePlayer) { playback.wantPlay = !playback.wantPlay; nativePlayer.command(playback.wantPlay ? "play" : "pause", ""); setPlaybackStatus(playback.wantPlay ? "preparing" : "paused"); return; }
     if (!audio.paused || playback.wantPlay) { playback.wantPlay = false; audio.pause(); setPlaybackStatus("paused"); savePlayback(); return; }
     playback.wantPlay = true;
     if (playback.needsSource) resolveCurrentSource();
@@ -691,7 +718,7 @@
   function playRandom() { var items = playbackItems(), candidates = [], current = state.current, i; for (i = 0; i < items.length; i++) if (!current || String(items[i].id) !== String(current.id)) candidates.push(items[i]); if (!candidates.length) candidates = items; if (candidates.length) play(candidates[Math.floor(Math.random() * candidates.length)]); }
   function handleEnded() { if (state.playbackListSource === "queue" && !state.queue.some(function (song) { return sameSong(song, state.current); })) { playRelative(1); return; } if (state.playMode === "one") { audio.currentTime = 0; var replay = audio.play(); if (replay && replay.catch) replay.catch(function () {}); return; } if (state.playMode === "shuffle") { playRandom(); return; } playRelative(1); }
   function applyLibrary(data) { if (!data) return; state.favorites = data.favorites || []; state.queue = data.playlists || []; state.recent = data.recent || []; state.authenticated = !!data.authenticated; state.librarySynced = !!data.synced; document.getElementById("queue-count").textContent = state.queue.length; renderQueueButton(); updateTrackStates(); }
-  function saveLibrary(done) { libraryWrite.revision += 1; libraryWrite.pending = true; if (done) libraryWrite.callbacks.push(done); flushLibraryWrite(); }
+  function saveLibrary(done) { libraryWrite.revision += 1; libraryWrite.pending = true; if (nativePlayer && state.current) savePlayback(); if (done) libraryWrite.callbacks.push(done); flushLibraryWrite(); }
   function flushLibraryWrite() {
     var settled = false;
     if (libraryWrite.inFlight || !libraryWrite.pending) return;
@@ -707,7 +734,7 @@
     });
   }
   function loadLibrary(done) { var revision = libraryWrite.revision; api("/api/library", "GET", null, function (err, data) { if (!err && data && revision === libraryWrite.revision && !libraryWrite.inFlight && !libraryWrite.pending) { applyLibrary(data); if (state.page === "account") renderAccount(); else if (state.page === "favorites") renderFavorites(); } if (done) done(err, data); }); }
-  function openLogin(mode) { var root = document.getElementById("modal-root"); state.modalPreviousFocus = document.activeElement; root.hidden = false; syncCommentMotion(); root.innerHTML = '<div class="modal" role="dialog"><button id="modal-close" class="modal-close focusable">×</button><h2>明明音乐账号</h2><div class="modal-tabs"><button class="is-active focusable" data-mode="login">登录</button><button class="focusable" data-mode="register">注册</button><button class="focusable" data-mode="reset">找回密码</button></div><form id="auth-form"><div class="field"><label>用户名或邮箱</label><input id="auth-user" class="focusable" autocomplete="username"></div><div class="field"><label>密码</label><input id="auth-pass" class="focusable" type="password" autocomplete="current-password"></div><div id="auth-extra"></div><div class="modal-actions"><button id="auth-scan" type="button" class="scan-button focusable">' + scanIcon() + '<span>扫码登录</span></button><button id="auth-submit" class="primary focusable">登录</button></div><div id="auth-message" class="modal-message" aria-live="polite"></div></form></div>'; document.getElementById("auth-scan").addEventListener("click", function () { openScan(root.getAttribute("data-mode") || "login"); }); document.getElementById("modal-close").addEventListener("click", closeLogin); each(root, "[data-mode]", function (b) { b.addEventListener("click", function () { setAuthMode(b.getAttribute("data-mode")); }); }); document.getElementById("auth-form").addEventListener("submit", submitAuth); setAuthMode(mode || "login"); document.getElementById("auth-user").focus(); }
+  function openLogin(mode) { var root = document.getElementById("modal-root"); state.exitDialog = false; root.removeAttribute("data-exit-dialog"); state.modalPreviousFocus = document.activeElement; root.hidden = false; syncCommentMotion(); root.innerHTML = '<div class="modal" role="dialog"><button id="modal-close" class="modal-close focusable">×</button><h2>明明音乐账号</h2><div class="modal-tabs"><button class="is-active focusable" data-mode="login">登录</button><button class="focusable" data-mode="register">注册</button><button class="focusable" data-mode="reset">找回密码</button></div><form id="auth-form"><div class="field"><label>用户名或邮箱</label><input id="auth-user" class="focusable" autocomplete="username"></div><div class="field"><label>密码</label><input id="auth-pass" class="focusable" type="password" autocomplete="current-password"></div><div id="auth-extra"></div><div class="modal-actions"><button id="auth-scan" type="button" class="scan-button focusable">' + scanIcon() + '<span>扫码登录</span></button><button id="auth-submit" class="primary focusable">登录</button></div><div id="auth-message" class="modal-message" aria-live="polite"></div></form></div>'; document.getElementById("auth-scan").addEventListener("click", function () { openScan(root.getAttribute("data-mode") || "login"); }); document.getElementById("modal-close").addEventListener("click", closeLogin); each(root, "[data-mode]", function (b) { b.addEventListener("click", function () { setAuthMode(b.getAttribute("data-mode")); }); }); document.getElementById("auth-form").addEventListener("submit", submitAuth); setAuthMode(mode || "login"); document.getElementById("auth-user").focus(); }
   function setAuthMode(mode) { var root = document.getElementById("modal-root"), extra = document.getElementById("auth-extra"), submit = document.getElementById("auth-submit"), actions = root.querySelector(".modal-actions"); each(root, "[data-mode]", function (b) { b.classList.toggle("is-active", b.getAttribute("data-mode") === mode); }); extra.innerHTML = mode === "register" ? '<div id="captcha-image" class="captcha-image"></div><div class="field"><label>验证码</label><input id="auth-code" class="focusable" placeholder="请输入验证码"></div>' : mode === "reset" ? '<div class="field"><label>邮箱验证码</label><input id="auth-code" class="focusable"></div><button id="send-reset" type="button" class="link-button focusable">发送验证码</button>' : ''; if (actions) actions.hidden = false; submit.textContent = mode === "register" ? "注册" : mode === "reset" ? "重置密码" : "登录"; root.setAttribute("data-mode", mode); var scan = document.getElementById("auth-scan"); if (scan) { scan.hidden = mode === "reset"; scan.innerHTML = scanIcon() + "<span>扫码" + (mode === "register" ? "注册" : "登录") + "</span>"; } if (mode === "register") api("/api/captcha", "GET", null, function (err, data) { if (!err && data && data.captchaId) root.setAttribute("data-captcha-id", data.captchaId); var svg = data && data.svg, holder = document.getElementById("captcha-image"); if (holder && svg) holder.innerHTML = '<img src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '" alt="验证码">'; }); if (mode === "reset") document.getElementById("send-reset").addEventListener("click", sendResetCode); }
   function sendResetCode() { var user = document.getElementById("auth-user").value, message = document.getElementById("auth-message"); if (!user) { message.textContent = "请先填写邮箱"; return; } message.textContent = "正在发送验证码…"; api("/api/user", "POST", JSON.stringify({action: "sendResetCode", email: user}), function (err, data) { message.textContent = err || !data || data.code === 0 ? ((data && data.msg) || (err && err.message) || "验证码发送失败") : "验证码已发送，请查收邮箱"; }); }
   function deviceActivity(device) { var created = Number(device && device.createdAt), age; if (!created || !isFinite(created)) return "登录时间未知"; age = Math.max(0, Date.now() - created); if (age < 60000) return "刚刚登录"; if (age < 3600000) return Math.floor(age / 60000) + " 分钟前登录"; if (age < 86400000) return Math.floor(age / 3600000) + " 小时前登录"; return Math.floor(age / 86400000) + " 天前登录"; }
@@ -754,7 +781,47 @@
       finishAuth(mode);
     });
   }
-  function closeLogin() { if (state.scan) { closeScan(); return; } var root = document.getElementById("modal-root"), previous = state.modalPreviousFocus, fallback; root.hidden = true; root.innerHTML = ""; state.modalPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else if (state.page === "account") { fallback = document.getElementById(state.authenticated ? "account-logout" : "account-login"); if (fallback) fallback.focus(); } syncCommentMotion(); }
+  function closeLogin() { if (state.scan) { closeScan(); return; } var root = document.getElementById("modal-root"), previous = state.modalPreviousFocus, fallback; state.exitDialog = false; root.removeAttribute("data-exit-dialog"); root.hidden = true; root.innerHTML = ""; state.modalPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else if (state.page === "account") { fallback = document.getElementById(state.authenticated ? "account-logout" : "account-login"); if (fallback) fallback.focus(); } syncCommentMotion(); }
+  function openExitConfirm() {
+    var root = document.getElementById("modal-root"), cancel, confirm;
+    if (!root || !root.hidden) return;
+    state.modalPreviousFocus = document.activeElement;
+    state.exitDialog = true;
+    root.setAttribute("data-exit-dialog", "true");
+    root.hidden = false;
+    root.innerHTML = '<div class="modal exit-modal" role="dialog" aria-modal="true" aria-labelledby="exit-title"><h2 id="exit-title">退出明明音乐？</h2><p>确认后将停止播放并关闭应用。</p><div class="modal-actions"><button id="exit-cancel" class="exit-cancel focusable" type="button">取消</button><button id="exit-confirm" class="primary focusable" type="button">退出</button></div></div>';
+    cancel = document.getElementById("exit-cancel");
+    confirm = document.getElementById("exit-confirm");
+    cancel.addEventListener("click", closeExitConfirm);
+    confirm.addEventListener("click", confirmExit);
+    syncCommentMotion();
+    cancel.focus();
+  }
+  function closeExitConfirm() {
+    var root = document.getElementById("modal-root"), previous = state.modalPreviousFocus;
+    if (!root || !state.exitDialog) return;
+    state.exitDialog = false;
+    root.removeAttribute("data-exit-dialog");
+    root.hidden = true;
+    root.innerHTML = "";
+    state.modalPreviousFocus = null;
+    if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else focusInitial();
+    syncCommentMotion();
+  }
+  function confirmExit() {
+    var button = document.getElementById("exit-confirm");
+    if (button) { button.disabled = true; button.textContent = "正在退出…"; }
+    savePlayback(true);
+    if (window.MingmingTVApp && window.MingmingTVApp.exit) {
+      window.MingmingTVApp.exit();
+      return;
+    }
+    // Browser previews cannot finish their host tab. Keep the same playback
+    // semantics so the flow remains testable outside an APK.
+    playback.wantPlay = false;
+    if (nativePlayer) nativePlayer.command("pause", ""); else audio.pause();
+    closeExitConfirm();
+  }
   function scanIcon() { return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/><path d="M7 7h3v3H7zM14 7h3v3h-3zM7 14h3v3H7zM14 14h3v3h-3z"/></svg>'; }
   function closeScan() {
     var scan = state.scan, root = document.getElementById("modal-root"), dialog = document.getElementById("scan-dialog"); if (!scan) return;
@@ -817,16 +884,17 @@
     api("/api/library", "PUT", JSON.stringify({favorites: state.favorites, playlists: state.queue, recent: state.recent, merge: true}), function (err, data) { if (!err && data) applyLibrary(data); done(err, !!(data && data.synced)); });
   }
   function handleBack() {
-    if (!document.getElementById("modal-root").hidden) { closeLogin(); return true; }
+    var modal = document.getElementById("modal-root");
+    if (!modal.hidden) { if (state.exitDialog) closeExitConfirm(); else closeLogin(); return true; }
     if (state.queueOpen) { closeQueuePopup(); return true; }
     if (state.playerOpen) { closePlayerOverlay(); return true; }
     if (state.detailReturn) { var back = state.detailReturn; renderPage(back.page); state.returnPlaylist = {id: back.id, page: back.page, anchor: document.activeElement}; restorePlaylistReturn(content); return true; }
     if (state.page !== "recommend") { renderPage("recommend"); document.getElementById("nav-recommend").focus(); return true; }
-    savePlayback(true); playback.wantPlay = false; audio.pause(); return false;
+    openExitConfirm(); return true;
   }
   window.MingmingTVBack = handleBack;
   window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) closeScan(); };
-  window.MingmingTVForeground = function () { commentMotion.background = false; syncCommentMotion(); };
+  window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); syncCommentMotion(); };
   document.addEventListener("visibilitychange", function () { if (document.hidden) window.MingmingTVBackground(); else window.MingmingTVForeground(); });
   window.addEventListener("pageshow", window.MingmingTVForeground);
   window.addEventListener("resize", syncCommentMotion);
@@ -864,7 +932,8 @@
     if (!isFinite(time) || !duration) return;
     time = Math.max(0, Math.min(duration, time));
     playback.position = time;
-    if (playback.sourceReady) audio.currentTime = time; else playback.pendingSeek = time;
+    if (nativePlayer) { nativePlayer.command("seek", String(time)); playback.pendingSeek = null; }
+    else if (playback.sourceReady) audio.currentTime = time; else playback.pendingSeek = time;
     syncProgress(time); updateLyrics(time); savePlayback();
   }
   function finishSeek() {
@@ -903,7 +972,7 @@
     document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("player-duration").textContent = duration;
     document.getElementById("overlay-elapsed").textContent = elapsed; document.getElementById("overlay-duration").textContent = duration;
   }
-  function setPlaybackStatus(status) { state.playbackStatus = status; setPlaybackButtonState(!audio.paused && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); syncCommentMotion(); }
+  function setPlaybackStatus(status) { state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
   audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });
@@ -921,6 +990,7 @@
   audio.addEventListener("canplay", mediaCanSeek); audio.addEventListener("progress", mediaCanSeek);
   audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(playbackPosition()); if (playback.sourceReady && !audio.paused && Date.now() - playbackWrite.lastSave >= 5000) savePlayback(); });
   audio.addEventListener("ended", function () { setPlaybackStatus("ended"); handleEnded(); });
+  if (nativePlayer) window.setInterval(function () { if (!commentMotion.background && !document.hidden) refreshNativePlayback(); }, 500);
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
   document.addEventListener("keydown", function (e) { if (e.keyCode === 27 || e.keyCode === 4) { if (handleBack()) e.preventDefault(); return; } if (e.keyCode === 37 || e.keyCode === 38 || e.keyCode === 39 || e.keyCode === 40 || e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 66) { e.preventDefault(); moveFocus(e.keyCode); } });
 
