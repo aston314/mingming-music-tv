@@ -72,8 +72,8 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     assert.equal(await page.locator('#queue-open').getAttribute('aria-label'), '播放列表 2');
     assert.equal(await page.locator('.nav-item.is-active').getAttribute('data-page'), 'favorites');
     const firstQueueRow = page.locator('.queue-popup [data-track-id="resume-first"]');
-    assert.equal(await firstQueueRow.locator('.track-info span').textContent(), '恢复测试歌手 · 恢复测试专辑');
-    assert.equal(await page.locator('.queue-popup [data-track-id="resume-next"] .track-info span').textContent(), '测试歌手 · 下一首测试专辑');
+    assert.equal(await firstQueueRow.locator('.track-info span').textContent(), '恢复测试歌手');
+    assert.equal(await page.locator('.queue-popup [data-track-id="resume-next"] .track-info span').textContent(), '测试歌手');
     assert.deepEqual(await firstQueueRow.locator('[data-action]').evaluateAll(nodes => nodes.map(n => n.dataset.action)), ['queue', 'favorite']);
     for (const selected of ['true', 'false']) {
       await firstQueueRow.locator('[data-action="queue"]').focus();
@@ -94,12 +94,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     assert.equal(await page.locator('#overlay-lyrics .active').textContent(), '恢复位置对应歌词');
     for (const size of [{width: 1920, height: 1080}, {width: 960, height: 540}]) {
       await page.setViewportSize(size);
-      const metadata = await page.locator('.overlay-song-meta').evaluate(el => {
-        const r = el.getBoundingClientRect(), panel = el.parentNode.getBoundingClientRect(), title = document.getElementById('overlay-title').getBoundingClientRect();
-        return {text: el.textContent, visible: r.height >= parseFloat(getComputedStyle(el).fontSize) && r.top >= title.bottom && r.bottom <= panel.bottom && r.bottom <= innerHeight};
-      });
-      assert.equal(metadata.text, '恢复测试歌手 · 恢复测试专辑');
-      assert.equal(metadata.visible, true, 'fullscreen metadata must have visible height');
+      assert.equal(await page.locator('.overlay-song-meta').count(), 0, 'fullscreen metadata row should be removed');
       await page.locator('#overlay-queue').click();
       assert.equal(await page.locator('.queue-popup .track-row').count(), 2);
       if (screenshotsDir) {

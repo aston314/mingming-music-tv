@@ -62,7 +62,7 @@ async function runFocusAudit(stage) {
   if(stage==='pages') {
     page('recommend');await auditWait(180);
     for(var nav of document.querySelectorAll('.nav-item')){auditFocus(nav);auditMove(22);auditCheck(document.getElementById('content').contains(document.activeElement),'sidebar right enters content');}
-    var sideLyrics=document.getElementById('side-lyrics');auditPath('.category-tab:last-child',22,sideLyrics&&sideLyrics.getClientRects().length?'#side-lyrics':'.category-tab:last-child','category right boundary');
+    auditPath('.category-tab:last-child',22,'.category-tab:last-child','category right boundary');
     auditFocus('[data-category-index="1"]');document.activeElement.click();await auditWait();auditCheck(document.activeElement.getAttribute('data-category-index')==='1','category redraw retains focus');
     auditFocus('[data-subcat="摇滚"]');document.activeElement.click();await auditWait();auditCheck(document.activeElement.getAttribute('data-subcat')==='摇滚','subcategory redraw retains focus');
     await auditSweep('#content');await auditSweep('.sidebar');
@@ -106,6 +106,10 @@ async function runFocusAudit(stage) {
     auditPath('#player-close',20,'#overlay-favorite');auditPath('#overlay-favorite',20,'#overlay-seek');auditPath('#overlay-seek',20,'#overlay-play');auditPath('#overlay-play',19,'#overlay-seek');auditPath('#overlay-seek',19,'#overlay-favorite');auditPath('#overlay-favorite',19,'#player-close');
     var controls=['player-repeat','overlay-prev','overlay-play','overlay-next','overlay-queue'];for(var i=0;i<controls.length;i++){auditPath('#'+controls[i],21,'#'+controls[Math.max(0,i-1)]);auditPath('#'+controls[i],22,i===controls.length-1?'#overlay-comments .comment':'#'+controls[i+1]);auditPath('#'+controls[i],19,'#overlay-seek');auditPath('#'+controls[i],20,'#'+controls[i]);}
     auditCheck(!document.getElementById('overlay-lyrics').classList.contains('focusable')&&document.getElementById('overlay-lyrics').tabIndex===-1,'fullscreen lyrics excluded from focus graph');
+    auditPath('#player-close',22,'#player-comments-toggle');auditPath('#player-comments-toggle',21,'#player-close');auditPath('#player-comments-toggle',20,'#overlay-comments .comment');
+    auditFocus('#player-comments-toggle');document.activeElement.click();auditCheck(document.activeElement.id==='player-comments-toggle'&&document.activeElement.getAttribute('aria-expanded')==='false','hide comments keeps toggle focus');
+    auditPath('#overlay-queue',22,'#player-comments-toggle','hidden comments right reaches toggle');auditPath('#overlay-favorite',22,'#player-comments-toggle');auditPath('#player-comments-toggle',20,'#overlay-favorite');await auditSweep('#player-overlay');
+    auditFocus('#player-comments-toggle');document.activeElement.click();auditCheck(document.activeElement.id==='player-comments-toggle'&&document.activeElement.getAttribute('aria-expanded')==='true','show comments keeps toggle focus');
     auditPath('#overlay-queue',22,'#overlay-comments .comment');auditMove(21);auditCheck(document.activeElement.id==='overlay-queue','comments left restores controls');
     await auditSweep('#player-overlay');
     auditFocus('#overlay-queue');document.activeElement.click();await auditWait();await auditSweep('#queue-popup');
@@ -113,7 +117,8 @@ async function runFocusAudit(stage) {
     var row=document.querySelector('.queue-popup .track-row');auditFocus(row);auditMove(22);document.activeElement.click();auditCheck(document.activeElement.getAttribute('data-action')==='remove-queue','popup delete restores deletion action');auditVisible(document.activeElement,'popup deletion');MingmingTVBack();auditCheck(document.activeElement.id==='overlay-queue','popup close restores control');
     var comments=document.getElementById('overlay-comments');auditFocus(comments.querySelector('.comment'));for(var k=0;k<36;k++)auditMove(20);await auditWait(180);auditCheck(comments.querySelectorAll('.comment').length>10,'comment focus scroll loads page');auditCheck(comments.contains(document.activeElement),'comment pagination keeps focus');auditVisible(document.activeElement,'comment pagination');
     comments.innerHTML='<div class="state">暂无评论</div>';auditPath('#overlay-queue',22,'#overlay-comments','empty comments can receive focus');auditMove(21);auditCheck(document.activeElement.id==='overlay-queue','empty comments return to controls');
-    MingmingTVBack();auditCheck(document.activeElement.id==='now-playing','fullscreen close restores origin');auditFocus('#side-lyrics');auditMove(21);auditCheck(document.getElementById('content').contains(document.activeElement),'side lyrics left returns content');
+    MingmingTVBack();auditCheck(document.activeElement.id==='now-playing','fullscreen close restores origin');
+    var sideLyrics=document.getElementById('side-lyrics');auditCheck(!sideLyrics.classList.contains('focusable')&&sideLyrics.tabIndex===-1,'side lyrics excluded from focus graph');auditFocus(sideLyrics);auditCheck(getComputedStyle(sideLyrics).outlineStyle==='none'&&getComputedStyle(sideLyrics).boxShadow==='none','side lyrics has no focus frame');auditMove(22);auditCheck(document.getElementById('content').contains(document.activeElement)&&document.activeElement.classList.contains('focusable'),'D-pad recovers from noninteractive lyrics focus');
   } else if(stage==='queue-toggle') {
     auditCheck(document.activeElement.id==='nav-recommend'&&getComputedStyle(document.activeElement).outlineStyle==='solid','launch has visible default navigation focus');
     MingmingTVBack();

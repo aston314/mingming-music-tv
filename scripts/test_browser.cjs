@@ -70,6 +70,8 @@ const {chromium} = require('playwright');
     }
     console.log('Player headings and two viewport sizes passed');
     await context.close();
+    await require('../tests/queue-loading-browser.cjs')({browser, url, screenshotsDir: scratch});
+    await require('../tests/comments-visibility-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/phone-login-browser.cjs')({browser, url});
     await require('../tests/playback-browser.cjs')({browser, url, restart, screenshotsDir: scratch});
   } finally {
