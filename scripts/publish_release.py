@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import quote
 
 def gh(*args):
     return subprocess.check_output(['gh', *args], text=True)
@@ -52,12 +53,17 @@ for file in files:
         assert existing[file.name]['digest'] == digest, 'existing bytes differ; preserving release'
     else:
         assert release['draft'], 'published release is missing assets'
-        gh('release', 'upload', tag, str(file), '--repo', repo)
+        # Address this exact draft, without resolving its tag through a list.
+        upload = release['upload_url'].split('{')[0] + '?name=' + quote(file.name)
+        uploaded = json.loads(gh('api', '--method', 'POST', upload,
+            '-H', 'Content-Type: application/octet-stream', '--input', str(file)))
+        assert uploaded['digest'] == digest and uploaded['size'] == file.stat().st_size
 release = json.loads(gh('api', 'repos/' + repo + '/releases/' + str(release['id'])))
 assets = {a['name']: a for a in release['assets']}
 for file in files:
     assert assets[file.name]['digest'] == 'sha256:' + hashlib.sha256(file.read_bytes()).hexdigest()
     assert assets[file.name]['size'] == file.stat().st_size
 if release['draft']:
-    gh('release', 'edit', tag, '--repo', repo, '--draft=false')
+    gh('api', '--method', 'PATCH', 'repos/' + repo + '/releases/' + str(release['id']),
+       '-F', 'draft=false')
 print('Published verified private release:', tag)
