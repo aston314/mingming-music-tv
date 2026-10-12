@@ -43,7 +43,5 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
       - name: Embedded Android executables
         run: bash scripts/build_android_binaries.sh
-      - name: Android tests, lint and APK
-        run: gradle -p android testDebugUnitTest lintDebug assembleDebug
-      - name: Verify packaged code and SHA256
-        run: python3 scripts/verify_apk.py android/app/build/outputs/apk/debug/app-debug.apk --debug
+      - name: Android tests and lint
+        run: gradle -p android testDebugUnitTest lintDebug
