@@ -31,10 +31,19 @@ files = [apk, args.directory / 'update.json', args.directory / 'SHA256SUMS.txt']
 releases = json.loads(gh('api', 'repos/' + repo + '/releases?per_page=100'))
 release = next((r for r in releases if r['tag_name'] == tag), None)
 if release is None:
-    gh('release', 'create', tag, '--repo', repo, '--target', args.commit, '--draft',
-       '--title', '明明音乐 ' + tag, '--notes-file', 'docs/releases/' + tag + '.md')
-    releases = json.loads(gh('api', 'repos/' + repo + '/releases?per_page=100'))
-    release = next(r for r in releases if r['tag_name'] == tag)
+    # Use the creation response directly: the list endpoint can lag behind a
+    # newly created draft and cannot be used as proof that creation failed.
+    release = json.loads(gh('api', '--method', 'POST', 'repos/' + repo + '/releases',
+        '-f', 'tag_name=' + tag, '-f', 'target_commitish=' + args.commit,
+        '-f', 'name=明明音乐 ' + tag, '-F', 'draft=true',
+        '-f', 'body=' + Path('docs/releases/' + tag + '.md').read_text()))
+elif release['target_commitish'] != args.commit and release['draft'] and not release['assets']:
+    # A failed initial upload may leave an empty draft. It contains no signed
+    # bytes, so it can be pointed at the repaired build without deleting assets.
+    release = json.loads(gh('api', '--method', 'PATCH',
+        'repos/' + repo + '/releases/' + str(release['id']),
+        '-f', 'target_commitish=' + args.commit,
+        '-f', 'body=' + Path('docs/releases/' + tag + '.md').read_text()))
 assert release['target_commitish'] == args.commit, 'release belongs to another source commit'
 existing = {a['name']: a for a in release['assets']}
 for file in files:
