@@ -1,4 +1,5 @@
 const assert = require('assert/strict');
+const path = require('path');
 
 function silentWave(seconds) {
   const rate = 8000, size = seconds * rate * 2, buffer = Buffer.alloc(44 + size);
@@ -10,11 +11,11 @@ function silentWave(seconds) {
   return buffer;
 }
 
-module.exports = async function testPlayback({browser, url, restart}) {
+module.exports = async function testPlayback({browser, url, restart, screenshotsDir}) {
   const wave = silentWave(120);
   const tracks = [
-    {id: 'resume-first', name: '恢复测试歌曲', artist: '恢复测试歌手', dt: 120000, type: 'wy', picUrl: 'https://example.invalid/cover.svg'},
-    {id: 'resume-next', name: '下一首测试歌曲', artist: '测试歌手', dt: 120000, type: 'wy', picUrl: 'https://example.invalid/cover.svg'}
+    {id: 'resume-first', name: '恢复测试歌曲', artist: '恢复测试歌手', al: {name: '恢复测试专辑'}, dt: 120000, type: 'wy', picUrl: 'https://example.invalid/cover.svg'},
+    {id: 'resume-next', name: '下一首测试歌曲', artist: '测试歌手', album: {name: '下一首测试专辑'}, dt: 120000, type: 'wy', picUrl: 'https://example.invalid/cover.svg'}
   ];
   const snapshot = {schema: 1, track: tracks[0], position: 47.25, duration: 120, mode: 'shuffle', list: tracks, listSource: 'recommend'};
   const contexts = [];
@@ -55,16 +56,60 @@ module.exports = async function testPlayback({browser, url, restart}) {
   }
   try {
     let context = await freshContext();
-    assert.equal((await context.request.put(url + '/api/library', {data: {favorites: [], playlists: tracks, recent: tracks}})).status(), 200);
+    assert.equal((await context.request.put(url + '/api/library', {data: {favorites: [], playlists: [tracks[1]], recent: tracks}})).status(), 200);
     assert.equal((await context.request.put(url + '/api/playback', {data: {clientId: 'browser-seed', sequence: 1, snapshot}})).status(), 200);
     let page = await context.newPage();
     await page.goto(url);
     await checkPausedRestore(page, snapshot);
     assert.equal(sourceRequests, 0, 'startup must not resolve or fetch audio');
     assert.equal(await page.locator('#side-lyrics .active').textContent(), '恢复位置对应歌词');
+    // The footer and fullscreen open the same active-source popup. Custom
+    // library membership is separate from the two-song playback source.
+    await page.locator('[data-page="favorites"]').click();
+    await page.locator('#queue-open').click();
+    assert.equal(await page.locator('#player-overlay').isVisible(), false);
+    assert.equal(await page.locator('.queue-popup .track-row').count(), 2);
+    assert.equal(await page.locator('#queue-open').getAttribute('aria-label'), '播放列表 2');
+    assert.equal(await page.locator('.nav-item.is-active').getAttribute('data-page'), 'favorites');
+    const firstQueueRow = page.locator('.queue-popup [data-track-id="resume-first"]');
+    assert.equal(await firstQueueRow.locator('.track-info span').textContent(), '恢复测试歌手 · 恢复测试专辑');
+    assert.equal(await page.locator('.queue-popup [data-track-id="resume-next"] .track-info span').textContent(), '测试歌手 · 下一首测试专辑');
+    assert.deepEqual(await firstQueueRow.locator('[data-action]').evaluateAll(nodes => nodes.map(n => n.dataset.action)), ['queue', 'favorite']);
+    for (const selected of ['true', 'false']) {
+      await firstQueueRow.locator('[data-action="queue"]').focus();
+      await firstQueueRow.locator('[data-action="queue"]').click();
+      assert.equal(await firstQueueRow.locator('[data-action="queue"]').getAttribute('aria-pressed'), selected);
+      assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'queue');
+      assert.equal(await page.evaluate(() => window.audioPlayCalls), 0, 'queue toggle must not play');
+    }
+    await page.evaluate(() => window.MingmingTVBack());
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'queue-open');
+    await page.locator('[data-page="queue"]').click();
+    await page.locator('[data-library-tab="recent"]').click();
+    const currentRow = page.locator('.track-list [data-track-id="resume-first"]');
+    await page.waitForSelector('.track-list .is-current .track-playing svg');
+    assert.equal(await currentRow.locator('.equalizer-bar').first().evaluate(el => getComputedStyle(el).animationPlayState), 'paused');
     await page.locator('#now-playing').click();
     assert.equal(await page.locator('#overlay-elapsed').textContent(), '00:47');
     assert.equal(await page.locator('#overlay-lyrics .active').textContent(), '恢复位置对应歌词');
+    for (const size of [{width: 1920, height: 1080}, {width: 960, height: 540}]) {
+      await page.setViewportSize(size);
+      const metadata = await page.locator('.overlay-song-meta').evaluate(el => {
+        const r = el.getBoundingClientRect(), panel = el.parentNode.getBoundingClientRect(), title = document.getElementById('overlay-title').getBoundingClientRect();
+        return {text: el.textContent, visible: r.height >= parseFloat(getComputedStyle(el).fontSize) && r.top >= title.bottom && r.bottom <= panel.bottom && r.bottom <= innerHeight};
+      });
+      assert.equal(metadata.text, '恢复测试歌手 · 恢复测试专辑');
+      assert.equal(metadata.visible, true, 'fullscreen metadata must have visible height');
+      await page.locator('#overlay-queue').click();
+      assert.equal(await page.locator('.queue-popup .track-row').count(), 2);
+      if (screenshotsDir) {
+        const shot = path.join(screenshotsDir, `player-popup-${size.width}.png`);
+        await page.screenshot({path: shot}); console.log('Player screenshot: ' + shot);
+      }
+      await page.evaluate(() => window.MingmingTVBack());
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'overlay-queue');
+    }
+    await page.setViewportSize({width: 1920, height: 1080});
     await page.locator('#player-close').click();
 
     // A second click can cancel playback while source resolution is pending.
@@ -80,7 +125,17 @@ module.exports = async function testPlayback({browser, url, restart}) {
     assert.ok(Math.abs(await page.evaluate(() => document.getElementById('audio').currentTime) - 47.25) < .1);
     await page.locator('#play').click();
     await page.waitForFunction(() => !document.getElementById('audio').paused && document.getElementById('audio').currentTime > 47.3);
+    const bar = currentRow.locator('.equalizer-bar').first();
+    assert.equal(await bar.evaluate(el => getComputedStyle(el).animationPlayState), 'running');
+    const moving = await bar.evaluate(el => getComputedStyle(el).transform);
+    await page.waitForTimeout(170);
+    assert.notEqual(await bar.evaluate(el => getComputedStyle(el).transform), moving, 'playing bars must move');
     await page.locator('#play').click();
+    assert.equal(await bar.evaluate(el => getComputedStyle(el).animationPlayState), 'paused');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const frozen = await bar.evaluate(el => getComputedStyle(el).transform);
+    await page.waitForTimeout(170);
+    assert.equal(await bar.evaluate(el => getComputedStyle(el).transform), frozen, 'paused bars must stop');
     await page.evaluate(() => window.MingmingTVBackground());
     const beforeRestart = await stored(context, url);
     assert.ok(beforeRestart.position > 47.25 && beforeRestart.position < 50);

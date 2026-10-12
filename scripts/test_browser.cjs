@@ -34,7 +34,7 @@ const {chromium} = require('playwright');
       return startCore();
     };
     if (process.argv.includes('--playback-only')) {
-      await require('../tests/playback-browser.cjs')({browser, url, restart});
+      await require('../tests/playback-browser.cjs')({browser, url, restart, screenshotsDir: scratch});
       return;
     }
     const context = await browser.newContext({viewport: {width: 1920, height: 1080}});
@@ -70,7 +70,8 @@ const {chromium} = require('playwright');
     }
     console.log('Player headings and two viewport sizes passed');
     await context.close();
-    await require('../tests/playback-browser.cjs')({browser, url, restart});
+    await require('../tests/phone-login-browser.cjs')({browser, url});
+    await require('../tests/playback-browser.cjs')({browser, url, restart, screenshotsDir: scratch});
   } finally {
     if (browser) await browser.close();
     if (child) child.kill('SIGTERM');

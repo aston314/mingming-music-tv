@@ -38,7 +38,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-Android 编译使用 Java 17、Gradle 8.10.2、SDK 35、NDK 27.2.12479018 和 Go 1.25。先执行 `bash scripts/build_android_binaries.sh`，再执行 `gradle -p android testDebugUnitTest lintDebug assembleDebug`。内置核心为可执行 PIE，打包到三个 ABI 的 `jniLibs` 中，由 Java 服务启动。
+Android 编译与签名在 GitHub Actions 中完成，使用 Java 17、Gradle 8.10.2、SDK 35、NDK 27.2.12479018 和 Go 1.25。工作流先执行 `bash scripts/build_android_binaries.sh`，恢复专用签名配置后执行 `gradle -p android testReleaseUnitTest lintRelease assembleRelease`，只生成签名 Release APK。内置核心为可执行 PIE，打包到三个 ABI 的 `jniLibs` 中，由 Java 服务启动。
 
 ## 私人测试发布
 

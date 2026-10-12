@@ -73,6 +73,18 @@ func TestPlaybackSurvivesCoreRestartAndLibraryChanges(t *testing.T) {
 	}
 }
 
+func TestPlaybackPreservesAlbumMetadataWithoutPrivateFields(t *testing.T) {
+	for _, field := range []string{"al", "album"} {
+		var input map[string]any
+		_ = json.Unmarshal([]byte(`{"id":"metadata-song","`+field+`":{"name":"测试专辑","picUrl":"https://example.test/cover.jpg","token":"private","extra":"private"}}`), &input)
+		clean := playbackTrack(input)
+		data, _ := json.Marshal(clean)
+		if !strings.Contains(string(data), "测试专辑") || strings.Contains(string(data), "private") || strings.Contains(string(data), "token") {
+			t.Fatalf("invalid album metadata filtering: %s", data)
+		}
+	}
+}
+
 func TestPlaybackRejectsLateWritesAndHandlesConcurrentSaves(t *testing.T) {
 	server := New(product.Load(), "test", "instance", t.TempDir(), true)
 	var wg sync.WaitGroup

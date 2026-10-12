@@ -192,6 +192,32 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) {
 
 // Both TV and phone use this account adapter. It never publishes a session itself.
 func (s *Server) accountRequest(ctx context.Context, method, query string, body []byte) ([]byte, int, error) {
+	var input, result map[string]any
+	_ = json.Unmarshal(body, &input)
+	if method == http.MethodPost && input["action"] == "kickAndLogin" {
+		// Both upstream attempts must finish within the TV/phone request window.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+	}
+	data, status, err := s.accountRequestOnce(ctx, method, query, body)
+	if method != http.MethodPost || err != nil || input["action"] != "kickAndLogin" || json.Unmarshal(data, &result) != nil || result["banned"] == true || (status < 400 && result["success"] != false && findToken(result) != "") {
+		return data, status, err
+	}
+	// The upstream UI retries ordinary login after a device kick: the session
+	// may already be removed, or the selected device list may have changed.
+	// Keep this in the shared adapter so TV and phone follow the same contract.
+	login := map[string]any{"password": input["password"]}
+	if email, _ := input["email"].(string); email != "" {
+		login["action"], login["email"] = "loginByEmail", email
+	} else {
+		login["action"], login["username"] = "login", input["username"]
+	}
+	retryBody, _ := json.Marshal(login)
+	return s.accountRequestOnce(ctx, http.MethodPost, "", retryBody)
+}
+
+func (s *Server) accountRequestOnce(ctx context.Context, method, query string, body []byte) ([]byte, int, error) {
 	if s.fixture {
 		return []byte(`{"success":true,"token":"fixture-private-session"}`), 200, nil
 	}
@@ -206,7 +232,11 @@ func (s *Server) accountRequest(ctx context.Context, method, query string, body 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "MingmingMusicTV/"+s.cfg.VersionName)
-	if auth := s.authHeader(); auth != "" {
+	var input map[string]any
+	_ = json.Unmarshal(body, &input)
+	action, _ := input["action"].(string)
+	unauthenticated := action == "login" || action == "loginByEmail" || action == "register" || action == "kickAndLogin"
+	if auth := s.authHeader(); auth != "" && !unauthenticated {
 		req.Header.Set("Authorization", auth)
 	}
 	resp, err := s.client.Do(req)

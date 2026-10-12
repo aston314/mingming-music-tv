@@ -3,7 +3,7 @@
   var config = JSON.parse(document.getElementById("pair-config").textContent), path = window.location.pathname.replace(/\/$/, ""), deadline = Date.now() + config.remaining * 1000, busy = false, finished = false;
   var form = document.getElementById("form"), value = document.getElementById("value"), password = document.getElementById("password"), message = document.getElementById("message"), submit = document.getElementById("submit"), devices = document.getElementById("devices");
   var captchaImage = document.getElementById("captcha"), captchaFrame = document.getElementById("captcha-frame"), captchaStatus = document.getElementById("captcha-status"), captchaRefresh = document.getElementById("captcha-refresh"), captchaCode = document.getElementById("captcha-code"), captchaReady = config.scope !== "register", captchaLoading = false;
-  function updateButtons() { submit.disabled = busy || finished || !captchaReady; captchaRefresh.disabled = busy || finished || captchaLoading; }
+  function updateButtons() { var buttons = devices.querySelectorAll("button"), i; submit.disabled = busy || finished || !captchaReady; captchaRefresh.disabled = busy || finished || captchaLoading; for (i = 0; i < buttons.length; i++) buttons[i].disabled = busy || finished || !buttons[i].getAttribute("data-kick-tail"); }
   function request(action, body, done) {
     var xhr = new XMLHttpRequest(); xhr.open(body ? "POST" : "GET", path + "/" + action, true); xhr.timeout = 22000;
     if (body) xhr.setRequestHeader("Content-Type", "application/json");
@@ -37,13 +37,13 @@
       form.hidden = true; devices.hidden = false; devices.innerHTML = ""; message.textContent = "登录设备已达上限，选择一台下线并登录此电视。";
       data.devices.forEach(function (device) {
         var button = document.createElement("button"); button.type = "button"; button.className = "device"; button.textContent = device.deviceName || "未知设备";
-        var description = document.createElement("small"); description.textContent = "下线此设备并登录电视"; button.appendChild(description); button.disabled = !device.tokenTail;
+        var description = document.createElement("small"); description.textContent = "下线此设备并登录电视"; button.appendChild(description); button.disabled = !device.tokenTail; if (device.tokenTail) button.setAttribute("data-kick-tail", device.tokenTail);
         button.onclick = function () { if (busy) return; busy = true; updateButtons(); message.textContent = "正在登录…"; request("resolve", {scope: config.scope, kickTail: device.tokenTail}, result); }; devices.appendChild(button);
       }); return;
     }
     message.textContent = data.message || data.error || "提交失败";
     if (ok && data.success) { finished = true; form.hidden = true; devices.hidden = true; password.value = ""; value.value = ""; if (config.scope === "search") message.textContent = "关键词已提交，电视会自动开始搜索。"; }
-    else if (data.error && !/请输入|请选择|输入无效/.test(data.error)) { finished = true; form.hidden = true; devices.hidden = true; password.value = ""; message.textContent += "\n请在电视刷新二维码后重试。"; }
+    else if (data.error && !data.retryable && !/请输入|请选择|输入无效/.test(data.error)) { finished = true; form.hidden = true; devices.hidden = true; password.value = ""; message.textContent += "\n请在电视刷新二维码后重试。"; }
     updateButtons();
   }
   document.getElementById("pair-code").textContent = config.code;

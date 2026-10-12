@@ -32,7 +32,7 @@
   function cover(song) { var value; if (!song) return "https://picsum.photos/seed/mingming-default/300/300"; value = song.picUrl || (song.al && song.al.picUrl) || song.coverPath || song.image || song.pic || song.pic_id; if (!isUrl(value)) return "https://picsum.photos/seed/mingming-default/300/300"; return value.charAt(0) === "/" ? "/media?url=" + encodeURIComponent(value) : value; }
   function songName(song) { return song && (song.name || song.title || song.mainTitle || "未命名歌曲"); }
   function artist(song) { var names = song && (song.ar || song.artists); if (names && names.length) return names.map(function (x) { return typeof x === "string" ? x : x.name; }).join(" / "); return song && (song.artist || "未知歌手"); }
-  function album(song) { return song && song.al ? song.al.name : (song && (song.album || "单曲")); }
+  function album(song) { var value = song && (song.al || song.album); return (value && typeof value === "object" ? value.name : value) || "单曲"; }
   function pageTitle(title, sub) { return '<div class="page-title"><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>'; }
   function renderState(message, error) { content.innerHTML = '<div class="state' + (error ? ' error' : '') + '">' + esc(message) + '</div>'; }
 
@@ -287,7 +287,7 @@
   }
   function songRowMarkup(song, index, actions, queueView) {
     var current = sameSong(state.current, song);
-    return '<div class="track-row focusable' + (queueView ? ' queue-popup-item' : '') + (current ? ' is-current' : '') + '" role="button" tabindex="0" data-song="' + index + '" data-track-id="' + esc(song.id) + '" aria-label="播放 ' + esc(songName(song)) + '">' + (queueView ? '<span class="queue-popup-index">' + (index + 1) + '</span>' : '') + '<img data-cover-song="' + index + '" src="' + esc(cover(song)) + '" alt=""><div class="track-info"><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + (queueView ? '' : ' · ' + esc(album(song))) + '</span></div><span class="track-playing" aria-label="正在播放">' + (queueView ? '正在播放' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12v8M12 4v16M19 8v12"/></svg>') + '</span><div class="track-actions">' + actions + '</div>' + (queueView ? '' : '<span class="track-duration">' + songDuration(song) + '</span>') + '</div>';
+    return '<div class="track-row focusable' + (queueView ? ' queue-popup-item' : '') + (current ? ' is-current' : '') + '" role="button" tabindex="0" data-song="' + index + '" data-track-id="' + esc(song.id) + '" aria-label="播放 ' + esc(songName(song)) + '">' + (queueView ? '<span class="queue-popup-index">' + (index + 1) + '</span>' : '') + '<img data-cover-song="' + index + '" src="' + esc(cover(song)) + '" alt=""><div class="track-info"><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + ' · ' + esc(album(song)) + '</span></div><span class="track-playing" aria-label="当前歌曲"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="equalizer-bar equalizer-bar-one" d="M5 12v8"/><path class="equalizer-bar equalizer-bar-two" d="M12 4v16"/><path class="equalizer-bar equalizer-bar-three" d="M19 8v12"/></svg></span><div class="track-actions">' + actions + '</div>' + (queueView ? '' : '<span class="track-duration">' + songDuration(song) + '</span>') + '</div>';
   }
   function card(song, index) { return '<button class="music-card focusable" data-song="' + index + '"><img data-cover-song="' + index + '" src="' + esc(cover(song)) + '" alt=""><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></button>'; }
   function playlistCard(playlist) { var id = playlist.id || playlist.playlistId || "", title = playlist.name || playlist.title || "精选歌单", creator = playlist.creator && playlist.creator.nickname || "网易云"; return '<button class="playlist-card focusable" data-playlist-id="' + esc(id) + '" data-playlist-name="' + esc(title) + '"><div class="playlist-cover"><img src="' + esc(playlist.coverImgUrl || playlist.cover || "https://picsum.photos/seed/playlist/360/360") + '" alt=""><span>网易云</span></div><strong>' + esc(title) + '</strong><small>' + esc(creator) + ' · ' + esc(playlist.trackCount || 0) + ' 首</small></button>'; }
@@ -327,11 +327,12 @@
     each(document, ".track-row[data-track-id]", function (row) {
       var current = state.current && row.getAttribute("data-track-id") === String(state.current.id), button = row.querySelector('[data-action="favorite"]'), favorite = state.favorites.some(function (song) { return String(song.id) === row.getAttribute("data-track-id"); }), queueButton = row.querySelector('[data-action="queue"]'), queued = isQueued({id: row.getAttribute("data-track-id")}), time = row.querySelector(".track-duration"), queueLabel = queued ? "从播放列表删除" : "加入播放列表";
       row.classList.toggle("is-current", !!current);
+      row.classList.toggle("is-playing", !!current && state.playbackStatus === "playing");
       if (button) { button.classList.toggle("is-selected", favorite); button.title = favorite ? "取消收藏" : "收藏歌曲"; button.setAttribute("aria-label", button.title); button.setAttribute("aria-pressed", favorite ? "true" : "false"); }
       if (queueButton) { queueButton.classList.toggle("is-selected", queued); queueButton.title = queueLabel; queueButton.setAttribute("aria-label", queueLabel); if (queueButton.getAttribute("aria-pressed") !== (queued ? "true" : "false")) queueButton.innerHTML = songActionIcon(queued ? "delete" : "queue"); queueButton.setAttribute("aria-pressed", queued ? "true" : "false"); }
       if (current && time && state.current.dt) time.textContent = songDuration(state.current);
     });
-    renderOverlayFavorite();
+    renderOverlayFavorite(); renderQueueButton();
   }
   function restoreLibraryFocus(index, scrollTop) {
     var rows = content.querySelectorAll(".track-row[data-song]"), target = rows[Math.min(index, rows.length - 1)] || content.querySelector(".tab.focusable") || document.querySelector('.nav-item[data-page="' + state.page + '"]');
@@ -534,10 +535,10 @@
     return '<svg ' + attrs + '><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/>' + (mode === "one" ? '<path d="m10 10 2-1v6M10 15h4"/>' : '') + '</svg>';
   }
   function renderQueueButton() {
-    var button = document.getElementById("queue-open");
+    var button = document.getElementById("queue-open"), count = playbackItems().length, label = "播放列表 " + count;
     if (!button) return;
-    button.innerHTML = controlIcon("queue") + '<span>播放列表 <b>' + state.queue.length + '</b></span>';
-    button.setAttribute("aria-label", "播放列表 " + state.queue.length);
+    if (button.getAttribute("aria-label") !== label) button.innerHTML = controlIcon("queue") + '<span>播放列表 <b>' + count + '</b></span>';
+    button.setAttribute("aria-label", label); button.title = label;
   }
   function playModeInfo() { var modes = {list: {label: "列表循环"}, one: {label: "单曲循环"}, shuffle: {label: "随机播放"}}; return modes[state.playMode] || modes.list; }
   function controlIcon(name) {
@@ -676,8 +677,8 @@
     var html = "", i, song, actions, favorite;
     for (i = 0; i < items.length; i++) {
       song = items[i]; favorite = isFavorite(song);
-      actions = trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
-      if (state.playbackListSource === "queue") actions += trackAction("remove-queue", "delete", "从播放列表删除");
+      actions = state.playbackListSource === "queue" ? trackAction("remove-queue", "delete", "从播放列表删除") : queueTrackAction(song);
+      actions += trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
       html += songRowMarkup(song, i, actions, true);
     }
     return html || '<div class="state">播放列表为空</div>';
@@ -685,14 +686,15 @@
   function renderQueuePopup(targetIndex, targetAction, scrollTop) {
     var popup = document.getElementById("queue-popup"), items = playbackItems(), close, i, row, target;
     if (!popup) return;
-    popup.innerHTML = '<div class="queue-dialog" role="dialog" aria-modal="true" aria-label="播放列表"><div class="queue-dialog-head"><div><h2>播放列表</h2><span>' + items.length + ' 首歌曲</span></div><button id="queue-popup-close" class="icon-button focusable" type="button" title="返回播放器" aria-label="返回播放器"></button></div><div class="queue-popup-list">' + queuePopupMarkup(items) + '</div></div>';
-    setControlIcon("queue-popup-close", "close", "返回播放器"); close = document.getElementById("queue-popup-close"); close.addEventListener("click", closeQueuePopup);
+    popup.innerHTML = '<div class="queue-dialog" role="dialog" aria-modal="true" aria-label="播放列表"><div class="queue-dialog-head"><div><h2>播放列表</h2><span>' + items.length + ' 首歌曲</span></div><button id="queue-popup-close" class="icon-button focusable" type="button" title="关闭播放列表" aria-label="关闭播放列表"></button></div><div class="queue-popup-list">' + queuePopupMarkup(items) + '</div></div>';
+    setControlIcon("queue-popup-close", "close", "关闭播放列表"); close = document.getElementById("queue-popup-close"); close.addEventListener("click", closeQueuePopup);
     each(popup, ".track-row[data-song]", function (el) {
       el.addEventListener("focusin", function () { el.classList.add("has-focus"); });
       el.addEventListener("focusout", function () { window.setTimeout(function () { if (!el.contains(document.activeElement)) el.classList.remove("has-focus"); }, 0); });
       el.addEventListener("click", function (event) {
         var node = event.target, action = null, index = parseInt(el.getAttribute("data-song"), 10), song = items[index], top = popup.querySelector(".queue-popup-list").scrollTop;
         while (node && node !== el) { if (node.getAttribute && node.getAttribute("data-action")) { action = node.getAttribute("data-action"); break; } node = node.parentNode; }
+        if (action === "queue") { toggleQueue(song); return; }
         if (action === "favorite") { toggleFavorite(song); return; }
         if (action === "remove-queue" && state.playbackListSource === "queue") {
           removeQueuedSong(song); renderQueuePopup(index, "remove-queue", top);
@@ -711,8 +713,8 @@
     if (typeof scrollTop === "number") popup.querySelector(".queue-popup-list").scrollTop = scrollTop;
     focusQueueTarget(target || row || close);
   }
-  function openQueuePopup() { var popup = document.getElementById("queue-popup"); if (!state.playerOpen || !popup) return; state.queuePreviousFocus = document.activeElement; state.queueOpen = true; popup.hidden = false; syncCommentMotion(); renderQueuePopup(); }
-  function closeQueuePopup() { var popup = document.getElementById("queue-popup"), previous = state.queuePreviousFocus, fallback; if (!popup) return; state.queueOpen = false; popup.hidden = true; state.queuePreviousFocus = null; fallback = document.getElementById("overlay-queue"); if (previous && previous.focus && document.body.contains(previous) && !previous.hidden) previous.focus(); else if (fallback) fallback.focus(); syncCommentMotion(); }
+  function openQueuePopup() { var popup = document.getElementById("queue-popup"); if (!popup || state.queueOpen) return; state.queuePreviousFocus = document.activeElement; state.queueOpen = true; popup.hidden = false; syncCommentMotion(); renderQueuePopup(); }
+  function closeQueuePopup() { var popup = document.getElementById("queue-popup"), previous = state.queuePreviousFocus, fallback; if (!popup) return; state.queueOpen = false; popup.hidden = true; state.queuePreviousFocus = null; fallback = document.getElementById(state.playerOpen ? "overlay-queue" : "queue-open"); if (isFocusable(previous) && previous.focus) previous.focus(); else if (fallback) fallback.focus(); syncCommentMotion(); }
   function closePlayerOverlay() { var overlay = document.getElementById("player-overlay"), previous = state.playerPreviousFocus; if (!overlay) return; if (state.queueOpen) closeQueuePopup(); state.playerOpen = false; overlay.hidden = true; stopCommentMotion(); state.playerPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else focusInitial(); }
   function cyclePlayMode() { state.playMode = state.playMode === "list" ? "one" : (state.playMode === "one" ? "shuffle" : "list"); renderPlayMode(); if (state.playerOpen) renderPlayerOverlay(); savePlayback(); }
   function playRandom() { var items = playbackItems(), candidates = [], current = state.current, i; for (i = 0; i < items.length; i++) if (!current || String(items[i].id) !== String(current.id)) candidates.push(items[i]); if (!candidates.length) candidates = items; if (candidates.length) play(candidates[Math.floor(Math.random() * candidates.length)]); }
@@ -914,7 +916,7 @@
   }
 
   each(document, ".nav-item", function (b) { b.addEventListener("click", function () { renderPage(b.getAttribute("data-page")); }); });
-  document.getElementById("queue-open").addEventListener("click", function () { renderPage("queue"); focusTarget(contentEntry()); });
+  document.getElementById("queue-open").addEventListener("click", openQueuePopup);
   document.getElementById("now-playing").addEventListener("click", openPlayerOverlay);
   document.getElementById("player-close").addEventListener("click", closePlayerOverlay);
   document.getElementById("player-repeat").addEventListener("click", cyclePlayMode);
@@ -972,7 +974,7 @@
     document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("player-duration").textContent = duration;
     document.getElementById("overlay-elapsed").textContent = elapsed; document.getElementById("overlay-duration").textContent = duration;
   }
-  function setPlaybackStatus(status) { state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); syncCommentMotion(); }
+  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (changed) updateTrackStates(); syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
   audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });

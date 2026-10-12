@@ -457,7 +457,12 @@ func (s *Server) phoneSubmit(w http.ResponseWriter, r *http.Request, v *scanSess
 		if v.Scope == "register" {
 			action = "register"
 		}
-		body = map[string]any{"action": action, "username": username, "email": username, "password": input.Password}
+		body = map[string]any{"action": action, "password": input.Password}
+		if action == "loginByEmail" {
+			body["email"] = username
+		} else {
+			body["username"] = username
+		}
 		if v.Scope == "register" {
 			body["captchaId"] = v.CaptchaID
 			body["captchaCode"] = input.CaptchaCode
@@ -488,6 +493,12 @@ func (s *Server) phoneSubmit(w http.ResponseWriter, r *http.Request, v *scanSess
 		v.State = "device_limit"
 		v.Message = "请在手机选择一台设备下线"
 		writeJSON(w, 200, result)
+		return
+	}
+	if resolve && (err != nil || status >= 500) {
+		v.State = "device_limit"
+		v.Message = "下线登录暂时失败，请重试或选择其它设备"
+		writeJSON(w, 502, map[string]any{"error": v.Message, "retryable": true})
 		return
 	}
 	v.Pending = nil

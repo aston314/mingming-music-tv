@@ -152,14 +152,16 @@ func playbackTrack(track map[string]any) map[string]any {
 			clean[key] = items
 		}
 	}
-	if album, ok := track["al"].(map[string]any); ok {
-		fields := map[string]any{}
-		for _, key := range []string{"name", "picUrl"} {
-			if text, ok := album[key].(string); ok && len(text) <= 2048 {
-				fields[key] = text
+	for _, albumKey := range []string{"al", "album"} {
+		if album, ok := track[albumKey].(map[string]any); ok {
+			fields := map[string]any{}
+			for _, key := range []string{"name", "picUrl"} {
+				if text, ok := album[key].(string); ok && len(text) <= 2048 {
+					fields[key] = text
+				}
 			}
+			clean[albumKey] = fields
 		}
-		clean["al"] = fields
 	}
 	return clean
 }

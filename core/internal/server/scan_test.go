@@ -184,35 +184,163 @@ func TestScanCancelledAccountResponseCannotPublishToken(t *testing.T) {
 	}
 }
 func TestScanLoginDeviceLimitContinuation(t *testing.T) {
+	for _, identity := range []struct{ value, field, action string }{
+		{"demo", "username", "login"},
+		{"demo@example.test", "email", "loginByEmail"},
+	} {
+		t.Run(identity.action, func(t *testing.T) {
+			s, v := scanFixture(t, "login")
+			s.fixture = false
+			s.token = "previous-session"
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				other := "email"
+				if identity.field == "email" {
+					other = "username"
+				}
+				if body[identity.field] != identity.value || body[other] != nil || r.Header.Get("Authorization") != "" {
+					t.Error("login must send one identity and no previous session")
+				}
+				if body["action"] == identity.action {
+					writeJSON(w, 409, map[string]any{"deviceLimit": true, "devices": []any{map[string]any{"tokenTail": "allowed", "deviceName": "old TV"}}})
+					return
+				}
+				if body["action"] != "kickAndLogin" || body["kickTail"] != "allowed" || body["password"] != "secret" {
+					t.Error("incorrect continuation")
+					http.Error(w, "bad", 400)
+					return
+				}
+				writeJSON(w, 200, map[string]any{"success": true, "token": "private-login-token"})
+			}))
+			defer upstream.Close()
+			s.cfg.Upstream = upstream.URL
+			h := s.PhoneHandler()
+			path := "/phone/" + v.ID
+			if w := scanRequest(h, "POST", path+"/submit", `{"scope":"login","username":"`+identity.value+`","password":"secret"}`); w.Code != 200 || v.State != "device_limit" {
+				t.Fatal("device limit unavailable")
+			}
+			if w := scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"unlisted"}`); w.Code != 400 {
+				t.Fatal("unlisted device accepted")
+			}
+			w := scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"allowed"}`)
+			if w.Code != 200 || v.State != "complete" || v.Pending != nil || strings.Contains(w.Body.String(), "private-login-token") {
+				t.Fatal("device resolution failed or leaked")
+			}
+		})
+	}
+}
+
+func TestScanDeviceKickFallbackAndRetry(t *testing.T) {
+	for _, mode := range []string{"logged-in-after-kick", "refreshed-devices", "temporary-failure", "banned"} {
+		t.Run(mode, func(t *testing.T) {
+			s, v := scanFixture(t, "login")
+			s.fixture = false
+			logins, kicks := 0, 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if body["email"] != "demo@example.test" || body["username"] != nil || body["password"] != "secret" {
+					t.Error("identity changed during device continuation")
+				}
+				if body["action"] == "kickAndLogin" {
+					kicks++
+					if kicks == 1 {
+						writeJSON(w, 400, map[string]any{"success": false, "error": "device changed", "banned": mode == "banned"})
+						return
+					}
+					writeJSON(w, 200, map[string]any{"success": true, "token": "private-retry-token"})
+					return
+				}
+				if body["action"] != "loginByEmail" || body["kickTail"] != nil {
+					t.Error("fallback must be ordinary login without a kick target")
+				}
+				logins++
+				if logins == 1 || mode == "refreshed-devices" {
+					tail := "initial"
+					if logins > 1 {
+						tail = "updated"
+					}
+					writeJSON(w, 409, map[string]any{"deviceLimit": true, "devices": []any{map[string]any{"tokenTail": tail}}})
+				} else if mode == "temporary-failure" {
+					writeJSON(w, 503, map[string]any{"error": "temporarily unavailable"})
+				} else {
+					writeJSON(w, 200, map[string]any{"success": true, "token": "private-retry-token"})
+				}
+			}))
+			defer upstream.Close()
+			s.cfg.Upstream = upstream.URL
+			h, path := s.PhoneHandler(), "/phone/"+v.ID
+			scanRequest(h, "POST", path+"/submit", `{"scope":"login","username":"demo@example.test","password":"secret"}`)
+			w := scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"initial"}`)
+			if mode == "banned" {
+				if w.Code != 400 || v.State != "failed" || logins != 1 || s.authHeader() != "" {
+					t.Fatal("banned login retried or authenticated")
+				}
+				return
+			}
+			if logins != 2 || strings.Contains(w.Body.String(), "private-retry-token") {
+				t.Fatal("missing ordinary login fallback or exposed token")
+			}
+			if mode == "logged-in-after-kick" {
+				if w.Code != 200 || v.State != "complete" || s.authHeader() != "Bearer private-retry-token" {
+					t.Fatal("fallback login did not authenticate TV")
+				}
+				return
+			}
+			if v.State != "device_limit" || v.Pending == nil || s.authHeader() != "" {
+				t.Fatal("recoverable failure lost continuation or authenticated TV")
+			}
+			tail := "initial"
+			if mode == "refreshed-devices" {
+				tail = "updated"
+				if w.Code != 200 || !strings.Contains(w.Body.String(), "updated") || scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"initial"}`).Code != 400 {
+					t.Fatal("stale device list still accepted")
+				}
+			} else if w.Code != 502 || !strings.Contains(w.Body.String(), `"retryable":true`) {
+				t.Fatal("temporary failure cannot be retried")
+			}
+			w = scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"`+tail+`"}`)
+			if w.Code != 200 || v.State != "complete" || v.Pending != nil || v.Devices != nil || strings.Contains(w.Body.String(), "private-retry-token") {
+				t.Fatal("device retry failed or retained private data")
+			}
+		})
+	}
+}
+
+func TestScanCancelledKickFallbackCannotPublishToken(t *testing.T) {
 	s, v := scanFixture(t, "login")
 	s.fixture = false
+	started, release := make(chan struct{}), make(chan struct{})
+	logins := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["action"] == "login" {
-			writeJSON(w, 409, map[string]any{"deviceLimit": true, "devices": []any{map[string]any{"tokenTail": "allowed", "deviceName": "old TV"}}})
+		if body["action"] == "kickAndLogin" {
+			writeJSON(w, 400, map[string]any{"success": false})
 			return
 		}
-		if body["action"] != "kickAndLogin" || body["kickTail"] != "allowed" || body["password"] != "secret" {
-			t.Error("incorrect continuation")
-			http.Error(w, "bad", 400)
+		logins++
+		if logins == 1 {
+			writeJSON(w, 409, map[string]any{"deviceLimit": true, "devices": []any{map[string]any{"tokenTail": "old-device"}}})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"success": true, "token": "private-login-token"})
+		close(started)
+		<-release
+		writeJSON(w, 200, map[string]any{"success": true, "token": "cancelled-private-token"})
 	}))
 	defer upstream.Close()
 	s.cfg.Upstream = upstream.URL
-	h := s.PhoneHandler()
-	path := "/phone/" + v.ID
-	if w := scanRequest(h, "POST", path+"/submit", `{"scope":"login","username":"demo","password":"secret"}`); w.Code != 200 || v.State != "device_limit" {
-		t.Fatal("device limit unavailable")
-	}
-	if w := scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"unlisted"}`); w.Code != 400 {
-		t.Fatal("unlisted device accepted")
-	}
-	w := scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"allowed"}`)
-	if w.Code != 200 || v.State != "complete" || v.Pending != nil || strings.Contains(w.Body.String(), "private-login-token") {
-		t.Fatal("device resolution failed or leaked")
+	h, path := s.PhoneHandler(), "/phone/"+v.ID
+	scanRequest(h, "POST", path+"/submit", `{"scope":"login","username":"demo","password":"secret"}`)
+	done := make(chan *httptest.ResponseRecorder)
+	go func() { done <- scanRequest(h, "POST", path+"/resolve", `{"scope":"login","kickTail":"old-device"}`) }()
+	<-started
+	scanRequest(s, "DELETE", "/api/scan/"+v.ID, "")
+	close(release)
+	w := <-done
+	if w.Code != 410 || v.Pending != nil || v.Devices != nil || s.authHeader() != "" || strings.Contains(w.Body.String(), "cancelled-private-token") {
+		t.Fatal("cancelled fallback published a token or retained credentials")
 	}
 }
 

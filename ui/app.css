@@ -107,7 +107,7 @@
 .overlay-controls .repeat-button{flex:0 0 48px}
 .player-overlay-head .repeat-button{margin-left:0}
 
-.queue-popup{position:absolute;inset:0;z-index:3;display:flex;justify-content:flex-end;padding:28px 34px;background:rgba(3,8,4,.68)}
+.queue-popup{position:fixed;top:0;right:0;bottom:0;left:0;z-index:9;display:flex;justify-content:flex-end;padding:28px 34px;background:rgba(3,8,4,.68)}
 .queue-popup[hidden]{display:none}
 .queue-dialog{display:flex;flex-direction:column;width:min(560px,100%);max-height:100%;padding:22px;border:1px solid #526955;border-radius:14px;background:#18251b;box-shadow:0 24px 70px rgba(0,0,0,.5)}
 .queue-dialog-head{display:flex;align-items:center;flex:0 0 auto;margin-bottom:14px}
@@ -263,7 +263,7 @@
 .side-panel .lyric-line{min-height:44px;font-size:22px;line-height:1.65}
 .side-panel .lyric-line.active{min-height:52px;font-size:30px;line-height:1.5}
 .overlay-lyrics .lyric-line{min-height:44px;font-size:24px;line-height:1.65}
-.overlay-lyrics .lyric-line.active{min-height:58px;font-size:34px;line-height:1.5}
+.overlay-lyrics .lyric-line.active{min-height:52px;font-size:30px;line-height:1.5}
 .side-comments .comment p,.overlay-comments .comment p{font-size:22px;line-height:1.65;overflow-wrap:break-word;word-wrap:break-word}
 .comment-meta{flex-wrap:wrap;gap:3px 8px}
 .side-comments .comment-meta strong,.overlay-comments .comment-meta strong{flex:1 1 100%;font-size:20px;line-height:1.4}
@@ -375,6 +375,12 @@
 .track-duration{flex:0 0 62px;text-align:right;color:#a7bcad;font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .track-playing{display:none;flex:0 0 26px;color:#c7f38d}
 .track-playing svg{display:block;width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:4;stroke-linecap:round}
+.equalizer-bar{animation:equalizer-bounce .8s ease-in-out infinite alternate;animation-play-state:paused}
+.equalizer-bar-one{transform-origin:5px 20px;animation-delay:-.35s}
+.equalizer-bar-two{transform-origin:12px 20px;animation-delay:-.7s}
+.equalizer-bar-three{transform-origin:19px 20px;animation-delay:-.15s}
+.track-row.is-playing .equalizer-bar{animation-play-state:running}
+@keyframes equalizer-bounce{from{transform:scaleY(.35)}to{transform:scaleY(1)}}
 .track-row.is-current .track-playing{display:block}
 .track-row.is-current:not(.has-focus):not(:hover) .track-actions{display:none}
 .side-panel{display:flex;width:29%;flex-basis:29%;max-width:500px;min-width:320px;padding:30px 26px 24px;border:0;background:transparent}
@@ -391,12 +397,13 @@
 .queue-popup .track-row:last-child{margin-bottom:0}
 .queue-popup .track-row:focus,.queue-popup .track-row.has-focus{outline:none;outline-offset:0;box-shadow:0 0 0 3px #c7f38d}
 .queue-popup-index{flex:0 0 24px;width:24px;font-size:18px}
-.queue-popup .track-playing{flex:0 0 auto;font-size:17px;font-weight:700;white-space:nowrap}
+.queue-popup .track-playing{flex:0 0 26px}
 .queue-popup .track-row.has-focus .track-playing,.queue-popup .track-row:hover .track-playing{display:none}
 .queue-popup .track-actions{gap:8px}
 .queue-popup .track-action{flex-basis:40px;width:40px;height:40px}
 .queue-popup .track-action svg{width:23px;height:23px}
 .overlay-song-heading,.overlay-song-meta{width:100%;max-width:480px}
+.player-art-panel>img,.overlay-song-heading,.overlay-song-meta,.overlay-progress,.overlay-controls{flex-shrink:0}
 .overlay-song-heading{display:flex;align-items:center;margin-top:24px;min-height:52px}
 .overlay-song-heading strong{flex:1;min-width:0;font-size:36px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .favorite-button{flex:0 0 52px;width:52px;height:52px;margin-left:16px;border-radius:50%;background:transparent;color:#e5eee6}
