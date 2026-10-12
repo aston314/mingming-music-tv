@@ -32,6 +32,7 @@ jobs:
       - name: Checks and browser focus regression
         run: |
           python3 scripts/validate_tv_app.py .
+          python3 -m unittest discover -s tests -p 'test_*.py'
           go test -race ./...
           go vet ./...
           npm ci --ignore-scripts

@@ -52,9 +52,17 @@
 - 有同步歌词时，仅显示“歌词”标题，隐藏旁边的“同步歌词”状态文字；加载和失败提示仍保留。
 - 隔离 fixture 在 960×540 和 1920×1080 核对样式、评论自动分页与列表增删状态；焦点专项 18 项和页面/播放器回归检查无失败。真实 61509 已换新程序，三份嵌入 UI 资源 hash 与工程一致，启动焦点及播放列表只读核对通过。未修改真实收藏或播放列表，也未构建 APK 或验证实体 TV。
 
+2026-10-12 首次签名测试发布：
+
+- 全屏歌词标题改为与评论一致的绿色圆角胶囊，共享高度、字号、背景和 SVG 样式；全屏歌词继续不参与遥控焦点。
+- 私人仓库 `aston314/mingming-music-tv` 已建立，`v0.1.0` 签名 Release 已发布；源码提交为 `346208dbb4173875a29c0e4aea651a4d76b89cdd`，版本号 0.1.0 / versionCode 1。
+- GitHub Actions 的 Go race/vet、ES5 解析、浏览器回归、Android 单元测试、Lint 与签名构建通过。三个 ABI 均为可执行 Go PIE，打包后的配置和五份 UI 资源逐项匹配构建源码。
+- APK 为 8,736,836 字节，SHA256 为 `ccd58993df3a2e957364c82a02d7cdbf85d2af8f35be21a91681b830b2bfb607`；本地下载、GitHub asset digest、校验文件和 CI 签名验证报告一致。
+- 发布资产为 APK、`update.json`、`SHA256SUMS.txt`，无临时 Actions APK artifact。当前私人安装渠道，无公共镜像或应用内升级。
+- 发布后修正草稿列表延迟与编辑丢失版本标签的问题：使用创建响应与明确 Release ID，编辑时保留版本标签，发布后检查标签指向；补充三项发布恢复回归测试。Release 标签元数据已修复，签名 APK 字节保持不变。
+
 待实体环境验证：
 
-- 安装 Android SDK/Java 后的 Gradle APK 构建。
-- 用 Android NDK 执行 `scripts/build_android_binaries.sh` 并验证三种 ABI。
 - 实体 Android TV 遥控器焦点、系统 IME、媒体首帧和后台恢复。
+- Android 6 旧版 WebView 与不同电视上的布局、音频格式和长时间播放。
 - 实体 TV 上的账号登录闭环仍待验证；浏览器已确认真实账号会话和空收藏提示，写入失败会保留本地数据并标记待重试。

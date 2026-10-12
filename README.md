@@ -27,6 +27,7 @@ Android TV 音乐应用，显示名“明明音乐”，包名 `com.aston.mingmi
 
 ```sh
 python3 scripts/validate_tv_app.py .
+python3 -m unittest discover -s tests -p 'test_*.py'
 go test -race ./...
 go vet ./...
 npm ci --ignore-scripts

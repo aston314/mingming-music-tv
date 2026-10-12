@@ -43,6 +43,7 @@ elif release['target_commitish'] != args.commit and release['draft'] and not rel
     # bytes, so it can be pointed at the repaired build without deleting assets.
     release = json.loads(gh('api', '--method', 'PATCH',
         'repos/' + repo + '/releases/' + str(release['id']),
+        '-f', 'tag_name=' + tag,
         '-f', 'target_commitish=' + args.commit,
         '-f', 'body=' + Path('docs/releases/' + tag + '.md').read_text()))
 assert release['target_commitish'] == args.commit, 'release belongs to another source commit'
@@ -64,6 +65,12 @@ for file in files:
     assert assets[file.name]['digest'] == 'sha256:' + hashlib.sha256(file.read_bytes()).hexdigest()
     assert assets[file.name]['size'] == file.stat().st_size
 if release['draft']:
-    gh('api', '--method', 'PATCH', 'repos/' + repo + '/releases/' + str(release['id']),
-       '-F', 'draft=false')
+    release = json.loads(gh('api', '--method', 'PATCH',
+        'repos/' + repo + '/releases/' + str(release['id']),
+        '-f', 'tag_name=' + tag, '-f', 'target_commitish=' + args.commit,
+        '-F', 'draft=false'))
+assert not release['draft'] and release['tag_name'] == tag
+assert release['target_commitish'] == args.commit
+tag_ref = json.loads(gh('api', 'repos/' + repo + '/git/ref/tags/' + tag))
+assert tag_ref['object']['type'] == 'commit' and tag_ref['object']['sha'] == args.commit
 print('Published verified private release:', tag)
