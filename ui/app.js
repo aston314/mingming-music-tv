@@ -42,7 +42,7 @@
   var focusMemory = {content: {}, footerReturn: null, overlayControl: "overlay-queue"};
   var libraryWrite = {inFlight: false, pending: false, revision: 0, callbacks: []};
   var queueLoading = {data: 0, covers: 0, token: 0};
-  var playback = {position: 0, duration: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false};
+  var playback = {position: 0, duration: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false, errorKind: "", errorCode: 0};
   var playbackWrite = {clientId: String(Date.now()) + "-" + String(Math.random()).slice(2), sequence: 0, revision: 0, inFlight: false, pending: null, lastSave: 0};
   function playbackPaused() { return nativePlayer ? !playback.wantPlay : audio.paused; }
   function playbackPosition() { return nativePlayer ? playback.position : playback.pendingSeek != null ? playback.pendingSeek : (playback.sourceReady ? (audio.currentTime || 0) : playback.position); }
@@ -80,6 +80,7 @@
     playback.position = saved.position || 0; playback.duration = saved.duration || 0; playback.pendingSeek = null;
     playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
     playback.resolving = data.state === "preparing";
+    playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
     setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); updateTrackStates();
     return true;
   }
@@ -595,7 +596,22 @@
     if (!overlay) return;
     if (song) { title.textContent = songName(song); coverNode.src = cover(song); }
     renderOverlayFavorite(); renderCommentsVisibility();
-    lyrics.innerHTML = lyricMarkup(); renderOverlayComments(comments, song); status.textContent = state.lyricLines.length ? "" : (song ? (state.lyricsLoaded ? "暂无歌词" : "正在加载歌词…") : "等待播放"); status.hidden = !!state.lyricLines.length; renderPlayMode(); updateCommentCount(); bindCommentScroll(comments); bindFocusScroll(comments); updateLyrics(playbackPosition()); syncCommentMotion();
+    lyrics.innerHTML = lyricMarkup(); renderOverlayComments(comments, song);
+    if (state.playbackStatus === "failed") {
+      status.textContent = playbackErrorText();
+      status.hidden = false;
+    } else {
+      status.textContent = state.lyricLines.length ? "" : (song ? (state.lyricsLoaded ? "暂无歌词" : "正在加载歌词…") : "等待播放");
+      status.hidden = !!state.lyricLines.length;
+    }
+    renderPlayMode(); updateCommentCount(); bindCommentScroll(comments); bindFocusScroll(comments); updateLyrics(playbackPosition()); syncCommentMotion();
+  }
+  function playbackErrorText() {
+    if (playback.errorKind === "network") return "播放源网络异常，请稍后重试";
+    if (playback.errorKind === "source") return "播放源返回异常，可能是试听或链接已失效";
+    if (playback.errorKind === "decode") return "设备不支持此音频格式";
+    if (playback.errorKind === "resolver") return "播放地址获取失败";
+    return "播放失败，请重试";
   }
   function scrollLyricIntoView(active) {
     var container, target, max, activeRect, containerRect;
@@ -668,9 +684,9 @@
   function resolveCurrentSource() {
     var song = state.current, token = state.playToken, directSource;
     if (!song || playback.resolving) return;
-    playback.resolving = true; setPlaybackStatus("preparing");
+    playback.resolving = true; playback.errorKind = ""; playback.errorCode = 0; setPlaybackStatus("preparing");
     directSource = song.audioPath || song.audioUrl || song.audio_url;
-    if (directSource) setAudioSource(directSource); else api("/api/music/url", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=" + encodeURIComponent(song.type || song.provider || "wy"), function (err, data) { var source = data && data.data, status; if (token !== state.playToken) return; playback.resolving = false; if (err || !source) { playback.wantPlay = false; setPlaybackStatus("failed"); status = document.getElementById("lyric-status"); status.textContent = "播放地址获取失败"; status.hidden = false; return; } setAudioSource(source); });
+    if (directSource) setAudioSource(directSource); else api("/api/music/url", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=" + encodeURIComponent(song.type || song.provider || "wy"), function (err, data) { var source = data && data.data, status; if (token !== state.playToken) return; playback.resolving = false; if (err || !source) { playback.errorKind = "resolver"; playback.errorCode = 0; playback.wantPlay = false; setPlaybackStatus("failed"); status = document.getElementById("lyric-status"); status.textContent = playbackErrorText(); status.hidden = false; return; } setAudioSource(source); });
   }
   function applyPendingSeek() {
     var target, i, seekable = false;
@@ -699,7 +715,7 @@
     else setPlaybackStatus("preparing");
   }
   function setAudioSource(source) {
-    playback.resolving = false; playback.needsSource = false; playback.sourceReady = false;
+    playback.resolving = false; playback.needsSource = false; playback.sourceReady = false; playback.errorKind = ""; playback.errorCode = 0;
     setPlaybackStatus(playback.wantPlay ? "preparing" : "paused"); audio.src = "/media?url=" + encodeURIComponent(source); audio.load();
   }
   function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), close; if (!state.current || !overlay) return; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); close = document.getElementById("player-close"); if (close) close.focus(); }
@@ -1020,7 +1036,7 @@
     document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("player-duration").textContent = duration;
     document.getElementById("overlay-elapsed").textContent = elapsed; document.getElementById("overlay-duration").textContent = duration;
   }
-  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (changed) updateTrackStates(); syncCommentMotion(); }
+  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (changed) updateTrackStates(); if (status === "failed") { var label = document.getElementById("lyric-status"); if (label) { label.textContent = playbackErrorText(); label.hidden = false; } } syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
   audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });

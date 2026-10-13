@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
@@ -44,13 +45,17 @@ final class NativeMusicPlayer {
     private final ExecutorService writer = Executors.newSingleThreadExecutor();
     private final ExoPlayer player;
     private final MediaSession session;
+    private final PendingIntent appIntent;
     private final String clientId = "native-" + UUID.randomUUID();
     private final Random random = new Random();
     private JSONObject track;
     private JSONArray list = new JSONArray();
     private String mode = "list", listSource = "", status = "idle";
+    private String errorKind = "";
+    private int errorCode;
     private double position, duration;
     private long generation, sequence, lastSave, selectionTag;
+    private int sourceRetryCount;
     private boolean ready, resolving, wantPlay, replacing, released, foreground, exiting;
     private volatile String published = "{}";
 
@@ -62,6 +67,7 @@ final class NativeMusicPlayer {
         player.setHandleAudioBecomingNoisy(true);
         player.setWakeMode(C.WAKE_MODE_NETWORK);
         session = new MediaSession(service, "明明音乐");
+        appIntent = openApp();
         session.setCallback(new MediaSession.Callback() {
             @Override public void onPlay() { play(); }
             @Override public void onPause() { pause(); }
@@ -70,12 +76,16 @@ final class NativeMusicPlayer {
             @Override public void onSkipToNext() { next(1, false); }
             @Override public void onSkipToPrevious() { next(-1, false); }
         }, main);
-        session.setSessionActivity(openApp());
+        session.setSessionActivity(appIntent);
         session.setActive(true);
         player.addListener(new Player.Listener() {
             @Override public void onEvents(Player value, Player.Events events) {
                 if (replacing || released) return;
-                if (value.getPlaybackState() == Player.STATE_READY) ready = true;
+                if (value.getPlaybackState() == Player.STATE_READY) {
+                    ready = true;
+                    errorKind = "";
+                    errorCode = 0;
+                }
                 if (value.getPlaybackState() == Player.STATE_ENDED && wantPlay) {
                     position = duration; publish("ended"); next(1, true); return;
                 }
@@ -84,8 +94,21 @@ final class NativeMusicPlayer {
             }
             @Override public void onPlayerError(PlaybackException error) {
                 if (released) return;
-                capture(); ready = false; resolving = false; wantPlay = false;
+                boolean retry = wantPlay && PlaybackDiagnostics.isRetryable(error.errorCode)
+                        && sourceRetryCount < PlaybackDiagnostics.MAX_SOURCE_RETRIES;
+                capture(); ready = false; resolving = false;
+                errorCode = error.errorCode;
+                errorKind = PlaybackDiagnostics.kind(error.errorCode);
                 replacing = true; player.stop(); player.clearMediaItems(); replacing = false;
+                if (retry) {
+                    sourceRetryCount++;
+                    publish("preparing");
+                    main.postDelayed(new Runnable() { @Override public void run() {
+                        if (!released && !exiting && track != null && wantPlay) play();
+                    } }, 350);
+                    return;
+                }
+                wantPlay = false;
                 publish("failed"); checkpoint(null);
             }
         });
@@ -122,6 +145,9 @@ final class NativeMusicPlayer {
         generation++; replacing = true; wantPlay = false; resolving = false; ready = false;
         player.stop(); player.clearMediaItems(); replacing = false;
         track = new JSONObject(selected.toString());
+        errorKind = "";
+        errorCode = 0;
+        sourceRetryCount = 0;
         selectionTag = value.optLong("selectionTag", 0);
         list = value.optJSONArray("list") == null ? new JSONArray() : value.getJSONArray("list");
         mode = value.optString("mode", "list"); listSource = value.optString("listSource", "");
@@ -138,6 +164,8 @@ final class NativeMusicPlayer {
     }
     private void play() {
         if (track == null || released || exiting) return;
+        // A user-triggered retry gets its own single bounded source retry.
+        if ("failed".equals(status)) sourceRetryCount = 0;
         // Start mediaPlayback foreground service before requesting focus (also required on API35).
         wantPlay = true;
         try { publish("preparing"); }
@@ -150,24 +178,50 @@ final class NativeMusicPlayer {
         final CoreEndpoint endpoint = CoreService.endpoint();
         resolver.execute(new Runnable() { @Override public void run() {
             String source = null;
+            Exception resolverFailure = null;
             try {
                 if (endpoint == null) throw new IllegalStateException("core unavailable");
                 String form = "id=" + URLEncoder.encode(selected.optString("id"), "UTF-8") + "&type="
                         + URLEncoder.encode(selected.optString("type", selected.optString("provider", "wy")), "UTF-8");
-                source = new JSONObject(request(endpoint.url + "api/music/url", "POST", form, "application/x-www-form-urlencoded")).optString("data");
-            } catch (Exception ignored) {}
+                for (int attempt = 0; attempt <= PlaybackDiagnostics.MAX_SOURCE_RETRIES; attempt++) {
+                    try {
+                        source = new JSONObject(request(endpoint.url + "api/music/url", "POST", form, "application/x-www-form-urlencoded")).optString("data");
+                        resolverFailure = null;
+                        break;
+                    } catch (Exception failure) {
+                        resolverFailure = failure;
+                        if (attempt < PlaybackDiagnostics.MAX_SOURCE_RETRIES) {
+                            try { Thread.sleep(350); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+                        }
+                    }
+                }
+            } catch (Exception failure) { resolverFailure = failure; }
             final String resolved = source;
+            final boolean resolverNetworkFailure = resolverFailure != null;
             main.post(new Runnable() { @Override public void run() {
                 if (released || exiting || request != generation) return;
                 resolving = false;
-                if (resolved == null || resolved.isEmpty()) { wantPlay = false; publish("failed"); checkpoint(null); return; }
+                if (resolved == null || resolved.isEmpty()) {
+                    errorKind = resolverNetworkFailure ? "network" : "resolver";
+                    errorCode = 0;
+                    wantPlay = false;
+                    publish("failed");
+                    checkpoint(null);
+                    return;
+                }
                 try {
                     String media = endpoint.url + "media?url=" + URLEncoder.encode(resolved, "UTF-8");
                     replacing = true;
                     player.setMediaItem(MediaItem.fromUri(media), (long) (position * 1000));
                     player.setPlayWhenReady(wantPlay); player.prepare(); replacing = false;
                     refresh();
-                } catch (Exception ignored) { replacing = false; wantPlay = false; publish("failed"); }
+                } catch (Exception ignored) {
+                    replacing = false;
+                    errorKind = "player";
+                    errorCode = 0;
+                    wantPlay = false;
+                    publish("failed");
+                }
             } });
         } });
     }
@@ -216,7 +270,10 @@ final class NativeMusicPlayer {
         try {
             published = new JSONObject().put("snapshot", track == null ? JSONObject.NULL : snapshot())
                     .put("state", status).put("ready", ready).put("wantPlay", wantPlay)
-                    .put("generation", generation).put("selectionTag", selectionTag).toString();
+                    .put("generation", generation).put("selectionTag", selectionTag)
+                    .put("errorKind", errorKind.isEmpty() ? JSONObject.NULL : errorKind)
+                    .put("errorCode", errorCode == 0 ? JSONObject.NULL : errorCode)
+                    .put("sourceRetryCount", sourceRetryCount).toString();
         } catch (Exception ignored) {}
         int nativeState = "playing".equals(status) ? PlaybackState.STATE_PLAYING : "failed".equals(status) ? PlaybackState.STATE_ERROR
                 : wantPlay ? PlaybackState.STATE_BUFFERING : PlaybackState.STATE_PAUSED;
@@ -226,7 +283,11 @@ final class NativeMusicPlayer {
         if (track != null && (changed || !foreground && wantPlay)) updateNotification();
     }
     private PendingIntent openApp() {
-        return PendingIntent.getActivity(service, 0, new Intent(service, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Intent intent = Intent.makeMainActivity(new ComponentName(service, MainActivity.class));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        return PendingIntent.getActivity(service, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
     private PendingIntent action(String name, int code) {
         return PendingIntent.getService(service, code, new Intent(service, CoreService.class).setAction(name), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -242,7 +303,7 @@ final class NativeMusicPlayer {
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(new NotificationChannel(CHANNEL, "音乐播放", NotificationManager.IMPORTANCE_LOW));
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(service, CHANNEL) : new Notification.Builder(service);
         Notification note = builder.setSmallIcon(R.drawable.ic_launcher).setContentTitle(title).setContentText(artist)
-                .setContentIntent(openApp()).setVisibility(Notification.VISIBILITY_PUBLIC).setShowWhen(false)
+                .setContentIntent(appIntent).setVisibility(Notification.VISIBILITY_PUBLIC).setShowWhen(false)
                 .setOngoing(wantPlay).setCategory(Notification.CATEGORY_TRANSPORT)
                 .addAction(android.R.drawable.ic_media_previous, "上一首", action("previous", 1))
                 .addAction(wantPlay ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play, wantPlay ? "暂停" : "播放", action(wantPlay ? "pause" : "play", 2))

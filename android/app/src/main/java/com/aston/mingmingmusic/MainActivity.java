@@ -41,6 +41,18 @@ public final class MainActivity extends Activity {
         waitForCore();
     }
     private void immersive() { getWindow().getDecorView().setSystemUiVisibility(5894); }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        immersive();
+        if (web != null && !destroyed) {
+            web.requestFocus();
+            web.evaluateJavascript("window.MingmingTVForeground&&window.MingmingTVForeground()", null);
+        } else if (!destroyed && !ready) {
+            startService(new Intent(this, CoreService.class));
+            waitForCore();
+        }
+    }
     private void restartStartup() {
         ready = false;
         if (web != null) { root.removeView(web); web.destroy(); web = null; }
