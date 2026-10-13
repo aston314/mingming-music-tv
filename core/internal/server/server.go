@@ -793,15 +793,15 @@ func fixtureArtistSongs() []map[string]any {
 
 func fixtureArtistAlbums() []map[string]any {
 	return []map[string]any{
-		{"id": "album-1", "name": "夜色专辑", "size": 2, "publishTime": 1735689600000, "picUrl": "https://picsum.photos/seed/artist-album-1/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
-		{"id": "album-2", "name": "远方来信", "size": 1, "publishTime": 1704067200000, "picUrl": "https://picsum.photos/seed/artist-album-2/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
-		{"id": "album-3", "name": "现场回声", "size": 3, "publishTime": 1672531200000, "picUrl": "https://picsum.photos/seed/artist-album-3/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
-		{"id": "album-4", "name": "第一束光", "size": 4, "publishTime": 1640995200000, "picUrl": "https://picsum.photos/seed/artist-album-4/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-1", "name": "夜色专辑", "size": 2, "publishTime": int64(1735689600000), "picUrl": "https://picsum.photos/seed/artist-album-1/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-2", "name": "远方来信", "size": 1, "publishTime": int64(1704067200000), "picUrl": "https://picsum.photos/seed/artist-album-2/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-3", "name": "现场回声", "size": 3, "publishTime": int64(1672531200000), "picUrl": "https://picsum.photos/seed/artist-album-3/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-4", "name": "第一束光", "size": 4, "publishTime": int64(1640995200000), "picUrl": "https://picsum.photos/seed/artist-album-4/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
 	}
 }
 
 func fixtureAlbum() map[string]any {
-	return map[string]any{"id": "album-1", "name": "夜色专辑", "size": 2, "publishTime": 1735689600000, "picUrl": "https://picsum.photos/seed/artist-album-1/360/360", "artist": fixtureArtist(), "description": "明明音乐预览专辑，收录两首适合夜晚聆听的歌曲。"}
+	return map[string]any{"id": "album-1", "name": "夜色专辑", "size": 2, "publishTime": int64(1735689600000), "picUrl": "https://picsum.photos/seed/artist-album-1/360/360", "artist": fixtureArtist(), "description": "明明音乐预览专辑，收录两首适合夜晚聆听的歌曲。"}
 }
 
 func fixtureAlbumSongs() []map[string]any {
