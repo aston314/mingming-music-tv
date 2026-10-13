@@ -885,7 +885,10 @@
   }
   function loadCommentsPage(page, token, append) {
     var song = state.current, offset, shouldAppend = !!append && page > 0, requestToken = state.playToken, settled = false;
-    if (!song || state.commentsHidden || (token && token !== requestToken) || state.commentsLoading || Date.now() < state.commentsRetryAt || (!state.commentsMore && shouldAppend)) return;
+    // Keep the first page request alive while comments are collapsed so the
+    // fullscreen toggle can show the next song's total immediately. Hidden
+    // comments still never paginate: only page zero is allowed here.
+    if (!song || (state.commentsHidden && (shouldAppend || page > 0)) || (token && token !== requestToken) || state.commentsLoading || Date.now() < state.commentsRetryAt || (!state.commentsMore && shouldAppend)) return;
     page = Math.max(0, page); state.commentsLoading = true; state.commentsError = false;
     if (!shouldAppend) { state.commentsLoaded = false; state.comments = []; }
     renderPlayerOverlay();

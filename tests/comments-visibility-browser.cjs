@@ -23,13 +23,17 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
     await context.route('**/api/music/lrc', route => route.fulfill({json: {data: Array.from({length: 30}, (_, i) => `[00:${String(i * 2).padStart(2, '0')}.00]这是第 ${i + 1} 行同步歌词`).join('\n')}}));
     await context.route(/https:\/\/(example\.invalid|picsum\.photos)\//, route => route.fulfill({contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#71965f"/></svg>'}));
     const requests = [];
-    let pending = null, releasePending;
+    let pending = null, releasePending, firstPending = null, releaseFirst, stalePending = null, releaseStale;
     await context.route('**/api/netease/comments?*', async route => {
       const params = new URL(route.request().url()).searchParams;
       const offset = Number(params.get('offset'));
-      requests.push({song: params.get('songId'), offset});
+      const songId = params.get('songId');
+      requests.push({song: songId, offset});
       if (offset === 10 && pending) await pending;
-      await route.fulfill({json: {comments: Array.from({length: 10}, (_, i) => ({user: {nickname: '评论用户 ' + (offset + i), avatarUrl: song.picUrl}, content: '评论区隐藏后保留这条评论与阅读位置。'.repeat(4)})), total: 30, more: offset < 20}});
+      if (songId === 'comments-next' && firstPending) await firstPending;
+      if (songId === 'comments-slow' && stalePending) await stalePending;
+      const total = {'comments-next': 73, 'comments-empty': 0, 'comments-slow': 91, 'comments-fast': 12}[songId] ?? 30;
+      await route.fulfill({json: {comments: Array.from({length: Math.min(10, Math.max(0, total - offset))}, (_, i) => ({user: {nickname: '评论用户 ' + (offset + i), avatarUrl: song.picUrl}, content: '评论区隐藏后保留这条评论与阅读位置。'.repeat(4)})), total, more: offset + 10 < total}});
     });
     const page = await context.newPage();
     const button = page.locator('#player-comments-toggle'), comments = page.locator('#overlay-comments');
@@ -120,16 +124,50 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
       assert.equal(requests.length, stoppedCount);
 
       // Hiding survives player close/reopen and a song change; the next song
-      // resets comment position and fetches its first page on expansion.
+      // prefetches only its first page to update the collapsed count.
       await page.keyboard.press('Escape'); await page.locator('#now-playing').click();
       assert.equal(await button.getAttribute('aria-expanded'), 'false');
+      await button.focus();
+      firstPending = new Promise(resolve => {releaseFirst = resolve;});
+      const firstRequest = page.waitForRequest(request => request.url().includes('/api/netease/comments?') && new URL(request.url()).searchParams.get('songId') === 'comments-next');
       await page.evaluate(() => {window.mockPlayback.snapshot.track = {...window.mockPlayback.snapshot.track, id: 'comments-next', name: '下一首布局测试'};});
+      await firstRequest;
       await page.waitForFunction(() => document.getElementById('overlay-title').textContent === '下一首布局测试');
-      assert.equal(requests.some(request => request.song === 'comments-next'), false);
+      assert.equal(await button.locator('.comments-toggle-count').innerText(), '…', 'next song displays loading rather than a false zero');
+      assert.equal(await page.locator('#player-comment-section').isVisible(), false);
+      releaseFirst(); firstPending = null;
+      await page.waitForFunction(() => document.querySelector('#player-comments-toggle .comments-toggle-count').textContent === '73');
+      assert.equal(await focus(), 'player-comments-toggle', 'count refresh keeps the toggle focus');
+      assert.equal(await button.getAttribute('aria-expanded'), 'false');
+      await comments.evaluate(el => {el.scrollTop = 99999; el.dispatchEvent(new Event('scroll'));});
+      await page.waitForTimeout(300);
+      assert.deepEqual(requests.filter(request => request.song === 'comments-next').map(request => request.offset), [0], 'hidden next song fetches a single first page without pagination');
+      const nextRequests = requests.length;
       await button.click();
       await page.waitForSelector('#overlay-comments .comment');
-      assert.equal(requests.some(request => request.song === 'comments-next' && request.offset === 0), true);
+      assert.equal(requests.length, nextRequests, 'expanding after hidden prefetch reuses the loaded first page');
       assert.ok(await comments.evaluate(el => el.scrollTop) < 50, 'next song starts comments at the beginning');
+
+      await button.click();
+      await page.evaluate(() => {window.mockPlayback.snapshot.track = {...window.mockPlayback.snapshot.track, id: 'comments-empty', name: '无评论测试'};});
+      await page.waitForFunction(() => document.getElementById('overlay-title').textContent === '无评论测试' && document.querySelector('#player-comments-toggle .comments-toggle-count').textContent === '0');
+      await page.waitForFunction(() => document.getElementById('overlay-comments').textContent === '暂无评论');
+      assert.deepEqual(requests.filter(request => request.song === 'comments-empty').map(request => request.offset), [0], 'a real empty result shows zero');
+
+      // A previous song's delayed first page cannot overwrite the new total.
+      stalePending = new Promise(resolve => {releaseStale = resolve;});
+      const slowRequest = page.waitForRequest(request => request.url().includes('/api/netease/comments?') && new URL(request.url()).searchParams.get('songId') === 'comments-slow');
+      await page.evaluate(() => {window.mockPlayback.snapshot.track = {...window.mockPlayback.snapshot.track, id: 'comments-slow'};});
+      await slowRequest;
+      await page.evaluate(() => {window.mockPlayback.snapshot.track = {...window.mockPlayback.snapshot.track, id: 'comments-fast'};});
+      await page.waitForFunction(() => document.querySelector('#player-comments-toggle .comments-toggle-count').textContent === '12');
+      const staleResponse = page.waitForResponse(response => response.url().includes('/api/netease/comments?') && new URL(response.url()).searchParams.get('songId') === 'comments-slow');
+      releaseStale(); stalePending = null;
+      await staleResponse;
+      await page.waitForTimeout(300);
+      assert.equal(await button.locator('.comments-toggle-count').innerText(), '12', 'late previous response does not replace the current count');
+      assert.equal(await page.locator('#player-comment-section').isVisible(), false);
+      assert.equal(await focus(), 'player-comments-toggle');
       assert.equal(await page.locator('#overlay-lyrics').getAttribute('tabindex'), '-1');
       assert.equal(await page.locator('#overlay-lyrics').evaluate(el => el.classList.contains('focusable')), false);
       await page.locator('#overlay-play').click();
@@ -137,6 +175,8 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
       assert.equal(await focus(), 'now-playing');
     } finally {
       if (releasePending) releasePending();
+      if (releaseFirst) releaseFirst();
+      if (releaseStale) releaseStale();
       await context.close();
     }
   }
