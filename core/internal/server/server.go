@@ -24,6 +24,7 @@ type Server struct {
 	version, instance, dataDir string
 	fixture                    bool
 	client                     *http.Client
+	mediaClient                *http.Client
 	mu                         sync.RWMutex
 	token                      string
 	handler                    http.Handler
@@ -33,7 +34,21 @@ type Server struct {
 }
 
 func New(cfg product.Config, version, instance, dataDir string, fixture bool) *Server {
-	s := &Server{cfg: cfg, version: version, instance: instance, dataDir: dataDir, fixture: fixture, client: &http.Client{Timeout: 18 * time.Second}}
+	// API calls need a bounded total timeout. Media bodies do not: a TV on a
+	// slower connection may legitimately take longer than that to stream the
+	// last bytes of a song. Keep a separate client so long audio reads do not
+	// weaken the timeout policy for metadata and account requests.
+	mediaTransport := http.DefaultTransport.(*http.Transport).Clone()
+	mediaTransport.ResponseHeaderTimeout = 20 * time.Second
+	s := &Server{
+		cfg:         cfg,
+		version:     version,
+		instance:    instance,
+		dataDir:     dataDir,
+		fixture:     fixture,
+		client:      &http.Client{Timeout: 18 * time.Second},
+		mediaClient: &http.Client{Transport: mediaTransport},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/api/status", s.health)
@@ -612,24 +627,34 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "媒体请求失败", 400)
 		return
 	}
+	// Audio is already compressed. Asking the upstream for identity encoding
+	// keeps Content-Length, Range and Content-Range meaningful to ExoPlayer.
+	req.Header.Set("Accept-Encoding", "identity")
 	if rangeValue := r.Header.Get("Range"); rangeValue != "" {
 		req.Header.Set("Range", rangeValue)
 	}
-	resp, err := s.client.Do(req)
+	if value := r.Header.Get("If-Range"); value != "" {
+		req.Header.Set("If-Range", value)
+	}
+	resp, err := s.mediaClient.Do(req)
 	if err != nil {
 		http.Error(w, "媒体暂时不可用", 502)
 		return
 	}
 	defer resp.Body.Close()
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	if v := resp.Header.Get("Content-Range"); v != "" {
-		w.Header().Set("Content-Range", v)
-	}
-	if v := resp.Header.Get("Accept-Ranges"); v != "" {
-		w.Header().Set("Accept-Ranges", v)
+	for _, key := range []string{
+		"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
+		"Content-Disposition", "ETag", "Last-Modified", "Cache-Control", "Expires", "Vary",
+	} {
+		if value := resp.Header.Get(key); value != "" {
+			w.Header().Set(key, value)
+		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.CopyN(w, resp.Body, 64<<20)
+	// Do not impose an application-level byte cap. The upstream Content-Length
+	// and the request context already bound this transfer, while io.Copy keeps
+	// the stream incremental instead of buffering a whole song.
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func (s *Server) fixtureResponse(w http.ResponseWriter, r *http.Request) {
