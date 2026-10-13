@@ -83,6 +83,34 @@ func TestFixtureRecommendationAndPlaylistShape(t *testing.T) {
 	}
 }
 
+func TestFixtureArtistAndAlbumContracts(t *testing.T) {
+	h := New(product.Load(), "0.1.0-dev", "test", t.TempDir(), true)
+	checks := []struct {
+		path string
+		want string
+	}{
+		{path: "/api/netease/search?keyword=%E9%A2%84%E8%A7%88", want: "result"},
+		{path: "/api/netease/artist?id=8926", want: "artist"},
+		{path: "/api/netease/artist/albums?id=8926&offset=0&limit=2", want: "hotAlbums"},
+		{path: "/api/netease/album?id=album-1", want: "songs"},
+	}
+	for _, check := range checks {
+		r := httptest.NewRequest(http.MethodGet, check.path, nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", check.path, w.Code)
+		}
+		var value map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &value); err != nil {
+			t.Fatalf("%s: invalid JSON: %v", check.path, err)
+		}
+		if _, ok := value[check.want]; !ok {
+			t.Fatalf("%s: missing %s in %#v", check.path, check.want, value)
+		}
+	}
+}
+
 func TestAuthenticatedLibrarySync(t *testing.T) {
 	var uploaded map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,10 @@ const {chromium} = require('playwright');
       await require('../tests/playback-browser.cjs')({browser, url, restart, screenshotsDir: scratch});
       return;
     }
+    if (process.argv.includes('--four-lyrics-only')) {
+      await require('../tests/four-line-lyrics-browser.cjs')({browser, url, screenshotsDir: scratch});
+      return;
+    }
     const context = await browser.newContext({viewport: {width: 1920, height: 1080}});
     const page = await context.newPage();
     const harness = fs.readFileSync('tests/focus-browser.js', 'utf8');
@@ -70,8 +74,10 @@ const {chromium} = require('playwright');
     }
     console.log('Player headings and two viewport sizes passed');
     await context.close();
+    await require('../tests/details-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/queue-loading-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/comments-visibility-browser.cjs')({browser, url, screenshotsDir: scratch});
+    await require('../tests/four-line-lyrics-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/phone-login-browser.cjs')({browser, url});
     await require('../tests/playback-browser.cjs')({browser, url, restart, screenshotsDir: scratch});
   } finally {

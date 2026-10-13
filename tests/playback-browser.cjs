@@ -40,6 +40,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
       return route.fulfill({status: match ? 206 : 200, contentType: 'audio/wav', headers: {'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1), ...(match ? {'Content-Range': `bytes ${start}-${end}/${wave.length}`} : {})}, body: wave.subarray(start, end + 1)});
     });
     await context.route('**/api/music/lrc', route => route.fulfill({json: {data: '[00:00.00]第一行\n[00:40.00]恢复位置对应歌词\n[01:10.00]下一行'}}));
+    await context.route('**/api/word-lyric?*', route => route.fulfill({json: {code: 1, data: {lyric: '[0,1000](0,1000,0)第一行\n[40000,1000](40000,1000,0)恢复位置对应歌词\n[70000,1000](70000,1000,0)下一行'}}}));
     await context.route(/https:\/\/(example\.invalid|picsum\.photos)\//, route => route.fulfill({contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#c7f38d"/></svg>'}));
     return context;
   }
@@ -74,7 +75,12 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     const firstQueueRow = page.locator('.queue-popup [data-track-id="resume-first"]');
     assert.equal(await firstQueueRow.locator('.track-info span').textContent(), '恢复测试歌手');
     assert.equal(await page.locator('.queue-popup [data-track-id="resume-next"] .track-info span').textContent(), '测试歌手');
-    assert.deepEqual(await firstQueueRow.locator('[data-action]').evaluateAll(nodes => nodes.map(n => n.dataset.action)), ['queue', 'favorite']);
+    assert.deepEqual(await firstQueueRow.locator('[data-action]').evaluateAll(nodes => nodes.map(n => n.dataset.action)), ['artist-info', 'queue', 'favorite']);
+    await firstQueueRow.focus();
+    await page.evaluate(() => window.MingmingTVKey(22));
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'artist-info');
+    await page.evaluate(() => window.MingmingTVKey(22));
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'queue');
     for (const selected of ['true', 'false']) {
       await firstQueueRow.locator('[data-action="queue"]').focus();
       await firstQueueRow.locator('[data-action="queue"]').click();
@@ -92,11 +98,27 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     await page.locator('#now-playing').click();
     assert.equal(await page.locator('#overlay-elapsed').textContent(), '00:47');
     assert.equal(await page.locator('#overlay-lyrics .active').textContent(), '恢复位置对应歌词');
+    assert.ok(await page.locator('#overlay-lyrics .lyric-line').count() > 2, 'fullscreen lyrics keep the complete list visible');
     for (const size of [{width: 1920, height: 1080}, {width: 960, height: 540}]) {
       await page.setViewportSize(size);
-      assert.equal(await page.locator('.overlay-song-meta').count(), 0, 'fullscreen metadata row should be removed');
+      for (const container of ['#side-lyrics', '#overlay-lyrics']) {
+        const typography = await page.locator(container).evaluate(node => {
+          const active = getComputedStyle(node.querySelector('.active'));
+          const normal = getComputedStyle(node.querySelector('.lyric-line:not(.active)'));
+          return {active: parseFloat(active.fontSize), normal: parseFloat(normal.fontSize), whiteSpace: active.whiteSpace};
+        });
+        assert.equal(typography.active - typography.normal, 3, 'current lyric is one controlled size larger');
+        assert.equal(typography.whiteSpace, 'nowrap', 'current lyric stays on a single line');
+      }
+      assert.equal(await page.locator('.overlay-song-meta').count(), 0, 'metadata does not add a row');
+      assert.equal(await page.locator('#overlay-track-meta').textContent(), '恢复测试歌手 · 恢复测试专辑');
       await page.locator('#overlay-queue').click();
       assert.equal(await page.locator('.queue-popup .track-row').count(), 2);
+      await page.locator('.queue-popup .track-row').first().focus();
+      await page.keyboard.press('ArrowRight');
+      assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'artist-info');
+      await page.keyboard.press('ArrowLeft');
+      assert.equal(await page.evaluate(() => document.activeElement.classList.contains('track-row')), true);
       if (screenshotsDir) {
         const shot = path.join(screenshotsDir, `player-popup-${size.width}.png`);
         await page.screenshot({path: shot}); console.log('Player screenshot: ' + shot);

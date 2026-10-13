@@ -56,6 +56,10 @@ func New(cfg product.Config, version, instance, dataDir string, fixture bool) *S
 	mux.HandleFunc("/api/netease/catalogue", s.proxyGet)
 	mux.HandleFunc("/api/netease/catplaylists", s.proxyGet)
 	mux.HandleFunc("/api/netease/comments", s.proxyGet)
+	mux.HandleFunc("/api/netease/search", s.proxyGet)
+	mux.HandleFunc("/api/netease/artist", s.proxyGet)
+	mux.HandleFunc("/api/netease/artist/albums", s.proxyGet)
+	mux.HandleFunc("/api/netease/album", s.proxyGet)
 	mux.HandleFunc("/api/aimusic/square", s.proxyGet)
 	mux.HandleFunc("/api/aimusic/song", s.proxyGet)
 	mux.HandleFunc("/api/comment", s.proxyGetOrPost)
@@ -670,6 +674,30 @@ func (s *Server) fixtureResponse(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"sub": fixtureCatalogue()})
 	case path == "/api/netease/catplaylists":
 		writeJSON(w, 200, map[string]any{"code": 200, "playlists": fixturePlaylists(r.URL.Query().Get("cat"))})
+	case path == "/api/netease/search":
+		writeJSON(w, 200, map[string]any{"code": 200, "result": map[string]any{"songs": fixtureArtistSongs(), "songCount": len(fixtureArtistSongs())}})
+	case path == "/api/netease/artist":
+		writeJSON(w, 200, map[string]any{"code": 200, "artist": fixtureArtist(), "hotSongs": fixtureArtistSongs()})
+	case path == "/api/netease/artist/albums":
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if offset < 0 {
+			offset = 0
+		}
+		if limit <= 0 || limit > 30 {
+			limit = 30
+		}
+		all := fixtureArtistAlbums()
+		if offset > len(all) {
+			offset = len(all)
+		}
+		end := offset + limit
+		if end > len(all) {
+			end = len(all)
+		}
+		writeJSON(w, 200, map[string]any{"code": 200, "artist": fixtureArtist(), "hotAlbums": all[offset:end]})
+	case path == "/api/netease/album":
+		writeJSON(w, 200, map[string]any{"code": 200, "resourceState": true, "album": fixtureAlbum(), "songs": fixtureAlbumSongs()})
 	case path == "/api/music/list":
 		writeJSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"playlist": map[string]any{"tracks": fixturePlaylistTracks()}}})
 	case path == "/api/aimusic/square":
@@ -680,6 +708,8 @@ func (s *Server) fixtureResponse(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"code": 1, "data": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"})
 	case path == "/api/music/lrc":
 		writeJSON(w, 200, map[string]any{"code": 1, "data": "[00:00.00] 明明音乐\n[00:08.00] 预览歌词"})
+	case path == "/api/word-lyric":
+		writeJSON(w, 200, map[string]any{"code": 1, "data": map[string]any{"lyric": "[0,4000](0,1000,0)明(1000,1000,0)明(2000,1000,0)音(3000,1000,0)乐\n[8000,4000](8000,1200,0)预(9200,1200,0)览(10400,1200,0)歌(11600,1200,0)词"}})
 	case path == "/api/comment" || path == "/api/netease/comments":
 		all := fixtureComments()
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -707,7 +737,7 @@ func (s *Server) fixtureResponse(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func fixtureSongs() []map[string]any {
-	return []map[string]any{{"id": "287398", "name": "晴天", "artist": "周杰伦", "album": "叶惠美", "pic_id": "https://picsum.photos/seed/song1/300/300"}, {"id": "509781655", "name": "稻香", "artist": "周杰伦", "album": "魔杰座", "pic_id": "https://picsum.photos/seed/song2/300/300"}, {"id": "1308454685", "name": "夜曲", "artist": "周杰伦", "album": "十一月的萧邦", "pic_id": "https://picsum.photos/seed/song3/300/300"}}
+	return []map[string]any{{"id": "287398", "name": "晴天", "artist": "周杰伦", "artistId": 6452, "album": "叶惠美", "albumId": 23735, "pic_id": "https://picsum.photos/seed/song1/300/300"}, {"id": "509781655", "name": "稻香", "artist": "周杰伦", "artistId": 6452, "album": "魔杰座", "albumId": 20965, "pic_id": "https://picsum.photos/seed/song2/300/300"}, {"id": "1308454685", "name": "夜曲", "artist": "周杰伦", "artistId": 6452, "album": "十一月的萧邦", "albumId": 18588, "pic_id": "https://picsum.photos/seed/song3/300/300"}}
 }
 
 func fixtureCatalogue() []map[string]any {
@@ -746,6 +776,38 @@ func fixturePlaylistTracks() []map[string]any {
 		{"id": 287398, "name": "晴天", "ar": []map[string]any{{"name": "周杰伦"}}, "al": map[string]any{"name": "叶惠美", "picUrl": "https://picsum.photos/seed/song1/300/300"}},
 		{"id": 509781655, "name": "稻香", "ar": []map[string]any{{"name": "周杰伦"}}, "al": map[string]any{"name": "魔杰座", "picUrl": "https://picsum.photos/seed/song2/300/300"}},
 		{"id": 1308454685, "name": "夜曲", "ar": []map[string]any{{"name": "周杰伦"}}, "al": map[string]any{"name": "十一月的萧邦", "picUrl": "https://picsum.photos/seed/song3/300/300"}},
+	}
+}
+
+func fixtureArtist() map[string]any {
+	return map[string]any{"id": 8926, "name": "预览歌手", "musicSize": 24, "albumSize": 4, "picUrl": "https://picsum.photos/seed/artist-preview/360/360", "img1v1Url": "https://picsum.photos/seed/artist-preview/360/360", "alias": []string{"Preview Artist"}}
+}
+
+func fixtureArtistSongs() []map[string]any {
+	return []map[string]any{
+		{"id": "artist-1", "name": "夜色里的歌", "dt": 214000, "ar": []map[string]any{{"id": 8926, "name": "预览歌手"}}, "al": map[string]any{"id": "album-1", "name": "夜色专辑", "picUrl": "https://picsum.photos/seed/artist-album-1/360/360"}},
+		{"id": "artist-2", "name": "回到夏天", "dt": 196000, "ar": []map[string]any{{"id": 8926, "name": "预览歌手"}}, "al": map[string]any{"id": "album-1", "name": "夜色专辑", "picUrl": "https://picsum.photos/seed/artist-album-1/360/360"}},
+		{"id": "artist-3", "name": "远方来信", "dt": 241000, "ar": []map[string]any{{"id": 8926, "name": "预览歌手"}}, "al": map[string]any{"id": "album-2", "name": "远方来信", "picUrl": "https://picsum.photos/seed/artist-album-2/360/360"}},
+	}
+}
+
+func fixtureArtistAlbums() []map[string]any {
+	return []map[string]any{
+		{"id": "album-1", "name": "夜色专辑", "size": 2, "publishTime": 1735689600000, "picUrl": "https://picsum.photos/seed/artist-album-1/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-2", "name": "远方来信", "size": 1, "publishTime": 1704067200000, "picUrl": "https://picsum.photos/seed/artist-album-2/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-3", "name": "现场回声", "size": 3, "publishTime": 1672531200000, "picUrl": "https://picsum.photos/seed/artist-album-3/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+		{"id": "album-4", "name": "第一束光", "size": 4, "publishTime": 1640995200000, "picUrl": "https://picsum.photos/seed/artist-album-4/360/360", "artists": []map[string]any{{"id": 8926, "name": "预览歌手"}}},
+	}
+}
+
+func fixtureAlbum() map[string]any {
+	return map[string]any{"id": "album-1", "name": "夜色专辑", "size": 2, "publishTime": 1735689600000, "picUrl": "https://picsum.photos/seed/artist-album-1/360/360", "artist": fixtureArtist(), "description": "明明音乐预览专辑，收录两首适合夜晚聆听的歌曲。"}
+}
+
+func fixtureAlbumSongs() []map[string]any {
+	return []map[string]any{
+		{"id": "artist-1", "name": "夜色里的歌", "dt": 214000, "ar": []map[string]any{{"id": 8926, "name": "预览歌手"}}, "al": map[string]any{"id": "album-1", "name": "夜色专辑", "picUrl": "https://picsum.photos/seed/artist-album-1/360/360"}},
+		{"id": "artist-2", "name": "回到夏天", "dt": 196000, "ar": []map[string]any{{"id": 8926, "name": "预览歌手"}}, "al": map[string]any{"id": "album-1", "name": "夜色专辑", "picUrl": "https://picsum.photos/seed/artist-album-1/360/360"}},
 	}
 }
 

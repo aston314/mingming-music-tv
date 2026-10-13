@@ -1,5 +1,7 @@
 # 明明音乐接口证据
 
+2026-10-13 网易云封面尺寸证据：用户提供的 `https://p3.music.126.net/DjFHDgJxYgByciKsCH3Tlg==/109951169614579889.jpg`，`param=800y800` 与 `param=400y400` 均返回HTTP200，响应体分别1,085,388和297,005字节。全屏旋转封面选择400×400；其他CDN保持原地址，查询参数及fragment保留。此测量确认响应尺寸/数据量，不代表Shield TV帧率已经验证。
+
 验证日期：2026-10-11；来源：[music.lzmhhh.com](https://music.lzmhhh.com/)。
 
 | 功能 | 方法与路径 | 关键参数 | 结果 |
@@ -10,6 +12,7 @@
 | 搜索 | `POST /api/music/search` | `name/type/page/limit/format` | `code/data` 歌曲列表 |
 | 播放地址 | `POST /api/music/url` | `id/type` | 短时效 MP3 地址 |
 | 歌词 | `POST /api/music/lrc` | `id/type` | LRC 文本 |
+| 逐字歌词 | `GET /api/word-lyric` | `id` | `data.lyric`，句级 `[start,duration]` 与字级 `(start,duration,...)` 时间标记 |
 | 灵感音乐 | `GET /api/aimusic/square` | `limit` | 广场歌曲 |
 | 评论 | `GET /api/comment` 或 `/api/netease/comments` | `songId/offset/limit` | 分页评论列表；条目含 `user.avatarUrl`、`user.nickname`、`timeStr`、`likedCount`，响应含 `total/more` |
 | 账号 | `POST/GET /api/user` | JSON action / Bearer | 登录、注册、重置、当前用户 |
@@ -60,6 +63,18 @@
 浏览器真实方向键路径验证导航→输入框→来源按钮、来源左右互返、来源向上返回输入、输入向左返回导航。模拟旧 API 缺失时，`webkitMatchesSelector` 与无参数 `focus()` 回退仍支持四方向及歌曲操作。`ui/app.js` 通过 Acorn `ecmaVersion=5` 解析，这属于语法/API 回退证据，不等于旧 Android WebView 实测。
 
 真实 `http://127.0.0.1:61509/` 重启后 `/app.js`、`/app.css`、`/` 与本地 UI 的 SHA256 均一致，`/health` 为非 fixture，`/api/library` 仍为 `authenticated=true/synced=true`。真实歌单详情、歌曲行左右操作入口、相邻歌曲上下与返回原歌单检查通过；仅移动焦点，未点击收藏、添加、删除或退出。
+
+2026-10-13 逐字歌词与详情返回：DevTools 读取 `/api/word-lyric?id=108640`，确认响应使用 `data.lyric`，每句包含毫秒起点/时长，每个字包含毫秒起点/时长。页面优先使用该接口按字渐进高亮，并以 `/api/music/lrc` 的普通 LRC 作为兼容降级；详情页返回栈按“歌曲列表 → 艺人入口弹窗 → 歌手详情 → 专辑详情”逐层恢复，返回歌手页时保留原专辑焦点，返回列表时重新打开艺人入口弹窗。顶部连接文字删除，状态点改为“明明音乐”右上角角标。
+
+2026-10-13 歌曲分享与音乐详情接口：通过 DevTools 在原站搜索「阴天 莫文蔚」并打开歌手/专辑页面确认：
+
+| 功能 | 方法与路径 | 关键字段/规则 |
+| --- | --- | --- |
+| 歌手详情 | `GET /api/netease/artist?id=8926` | `artist` 含 `musicSize/albumSize/picUrl/img1v1Url`；`hotSongs` 为热门歌曲 |
+| 歌手专辑分页 | `GET /api/netease/artist/albums?id=8926&offset=0&limit=30` | `hotAlbums`；使用 `offset + limit` 分页 |
+| 专辑详情 | `GET /api/netease/album?id=283137240` | `album` 含 `name/picUrl/publishTime/size/artist/description`；完整歌曲在 `songs` |
+
+项目新增同源 Go 代理路由及 fixture 合同。歌曲行和全屏播放列表行提供艺人信息图标，位于加入/删除及收藏操作之前；弹窗只保留歌手详情、专辑详情。歌手专辑按 `offset + limit=30` 滚动触底懒加载；热门歌曲与专辑歌曲的播放按钮统一使用 SVG，放在各自列表标题行右侧。Android 原生桥环境不渲染详情页返回按钮，遥控器返回键继续逐层返回；浏览器保留返回按钮。专项测试覆盖 1920×1080 与 960×540、Android 桥模拟、操作顺序、返回及焦点恢复，仍不代表实体 Android TV 已验证。
 
 
 2026-10-12 播放列表入口、歌曲信息与手机下线登录修复：

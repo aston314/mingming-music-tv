@@ -6,18 +6,20 @@
     catalogue: [], categoryIndex: 0,
     libraryView: "queue",
     activeCat: "华语", playlists: [], playbackList: [], playbackListSource: "", searchProvider: "wy",
-    lyricsText: "", lyricLines: [], lyricIndex: -1, lyricsLoaded: false, comments: [], commentsLoaded: false,
+    lyricsText: "", lyricLines: [], lyricIndex: -1, lyricsLoaded: false, lyricsWordLoaded: false, comments: [], commentsLoaded: false,
     commentsHidden: false, commentsScroll: 0,
     commentsPage: 0, commentsPageSize: 10, commentsTotal: 0, commentsMore: false, commentsLoading: false, commentsError: false, commentsRetryAt: 0,
     playbackStatus: "idle",
     playerOpen: false, playerPreviousFocus: null, queueOpen: false, queuePreviousFocus: null, modalPreviousFocus: null, exitDialog: false, playMode: "list", playToken: 0,
-    searchQuery: "", searchPage: 0, searchPageSize: 30, searchMore: false, searchLoading: false, searchRequest: 0, searchHistory: [], seekInput: null, detailReturn: null, returnPlaylist: null, scan: null, scanGeneration: 0
+    searchQuery: "", searchPage: 0, searchPageSize: 30, searchMore: false, searchLoading: false, searchRequest: 0, searchHistory: [], seekInput: null, detailReturn: null, detailKind: "", artistDetail: null, artistAlbums: [], artistAlbumsMore: false, artistAlbumsLoading: false, artistAlbumsError: "", artistAlbumsOffset: 0, artistAlbumsRequest: 0, albumDetail: null, shareMenu: null, returnPlaylist: null, scan: null, scanGeneration: 0
   };
   var content = document.getElementById("content"), side = document.getElementById("side-panel"), audio = document.getElementById("audio");
   var nativePlayer = window.MingmingNativePlayer && window.MingmingNativePlayer.command && window.MingmingNativePlayer.read ? window.MingmingNativePlayer : null;
+  var nativeApp = !!(window.MingmingTVApp || nativePlayer);
   var nativeSelection = 0, nativePendingSelection = 0;
   var commentMotion = {frame: null, last: 0, position: 0, scroll: 0, background: false, holdUntil: 0};
   var commentView = {token: -1, count: 0};
+  var overlayLyricView = {lines: null, message: null, four: false, width: 0, height: 0, index: -1, time: null, measure: null};
   var requestFrame = window.requestAnimationFrame ? function (fn) { return window.requestAnimationFrame(fn); } : function (fn) { return window.setTimeout(function () { fn(Date.now()); }, 32); };
   var cancelFrame = window.cancelAnimationFrame ? function (id) { window.cancelAnimationFrame(id); } : function (id) { window.clearTimeout(id); };
 
@@ -33,6 +35,15 @@
   }
   function isUrl(value) { return typeof value === "string" && /^(https?:\/\/|\/)/.test(value); }
   function cover(song) { var value; if (!song) return "https://picsum.photos/seed/mingming-default/300/300"; value = song.picUrl || (song.al && song.al.picUrl) || song.coverPath || song.image || song.pic || song.pic_id; if (!isUrl(value)) return "https://picsum.photos/seed/mingming-default/300/300"; return value.charAt(0) === "/" ? "/media?url=" + encodeURIComponent(value) : value; }
+  function fullscreenCover(song) {
+    var value = cover(song), hash, parts, query, i, params = [];
+    if (!/^https?:\/\/p\d+\.music\.126\.net\//i.test(value)) return value;
+    hash = value.indexOf("#"); hash = hash < 0 ? "" : value.slice(hash); if (hash) value = value.slice(0, -hash.length);
+    parts = value.split("?"); query = parts[1] ? parts[1].split("&") : [];
+    for (i = 0; i < query.length; i++) if (query[i] && !/^param=/i.test(query[i])) params.push(query[i]);
+    params.push("param=400y400");
+    return parts[0] + "?" + params.join("&") + hash;
+  }
   function songName(song) { return song && (song.name || song.title || song.mainTitle || "未命名歌曲"); }
   function artist(song) { var names = song && (song.ar || song.artists); if (names && names.length) return names.map(function (x) { return typeof x === "string" ? x : x.name; }).join(" / "); return song && (song.artist || "未知歌手"); }
   function album(song) { var value = song && (song.al || song.album); return (value && typeof value === "object" ? value.name : value) || "单曲"; }
@@ -115,7 +126,7 @@
   function parentMatch(node, selector, boundary) { while (node && node !== boundary && node !== document) { if (node.matches ? node.matches(selector) : node.webkitMatchesSelector && node.webkitMatchesSelector(selector)) return node; node = node.parentNode; } return null; }
   function activeNav() { return document.querySelector('.nav-item[data-page="' + state.page + '"]') || document.getElementById("nav-recommend"); }
   function bookmark(root) {
-    var active = document.activeElement, row, attributes = ["data-playlist-id", "data-search-history", "data-provider", "data-library-tab", "data-category-index", "data-subcat", "data-current-action", "data-mode", "data-comment-index"], key = {}, i;
+    var active = document.activeElement, row, attributes = ["data-playlist-id", "data-search-history", "data-provider", "data-library-tab", "data-category-index", "data-subcat", "data-current-action", "data-mode", "data-comment-index", "data-album-id"], key = {}, i;
     if (!active || !active.classList.contains("focusable") || !root.contains(active)) return null;
     key.node = active; key.top = root.scrollTop; key.owner = focusRoot(); key.index = visibleFocusables(root).indexOf(active);
     row = parentMatch(active, ".track-row", root);
@@ -196,6 +207,14 @@
     if (code === 40) { focusMemory.footerReturn = bookmark(content); return document.getElementById("seek"); }
     return nearestFocus(code, row, visibleFocusables(content).filter(function (node) { return !parentMatch(node, ".track-row", content); })) || row;
   }
+  function albumCardFocus(code, active) {
+    var card = parentMatch(active, ".album-card", content), cards, next;
+    if (!card || code !== 40) return null;
+    cards = content.querySelectorAll(".album-card"); next = nearestFocus(code, card, cards);
+    if (next) return next;
+    if (state.detailKind === "artist" && state.artistDetail && state.artistDetail.tab === "albums" && state.artistAlbumsMore && !state.artistAlbumsLoading && !state.artistAlbumsError) loadArtistAlbums(true);
+    return card;
+  }
   function playerFocusKey(code, active) {
     if (code !== 37 && code !== 38 && code !== 39 && code !== 40 && active.id !== "seek" && active.id !== "overlay-seek") return false;
     var ids = state.playerOpen ? ["player-repeat", "overlay-prev", "overlay-play", "overlay-next", "overlay-queue"] : ["now-playing", "play-mode", "prev", "play", "next", "queue-open"], index = ids.indexOf(active.id), target, comments = document.getElementById("overlay-comments"), toggle = document.getElementById("player-comments-toggle"), comment = parentMatch(active, ".comment", comments), commentEntry = state.commentsHidden ? toggle : visibleFocusables(comments)[0] || comments, nodes, next;
@@ -225,8 +244,9 @@
     return true;
   }
   function modalFocus(code, active, root) {
-    var close = document.getElementById(state.scan ? "scan-close" : "modal-close"), target;
+    var close = document.getElementById(state.scan ? "scan-close" : state.shareMenu ? "share-close" : "modal-close"), target;
     if (state.scan) { if (active === close) return code === 40 ? document.getElementById("scan-cancel") : active; if (code === 38) return close; }
+    else if (state.shareMenu) { if (active === close) return code === 40 ? root.querySelector("[data-share-action]") : active; }
     else { if (active === close) return code === 40 ? root.querySelector(".modal-tabs .is-active") : active; if (active.hasAttribute("data-mode") && code === 38) return close; if (active.id === "auth-user" && code === 38) return root.querySelector(".modal-tabs .is-active"); }
     target = nearestFocus(code, active, visibleFocusables(root)); return target || active;
   }
@@ -248,7 +268,7 @@
       else if (code === 40) { target = navs[index + 1] || document.getElementById("now-playing"); if (index === navs.length - 1) focusMemory.footerReturn = null; }
       else target = active;
     } else if (content.contains(active)) {
-      target = trackCardFocus(code, active) || nearestFocus(code, active, visibleFocusables(content).filter(function (node) { return !node.classList.contains("track-action"); }));
+      target = albumCardFocus(code, active) || trackCardFocus(code, active) || nearestFocus(code, active, visibleFocusables(content).filter(function (node) { return !node.classList.contains("track-action"); }));
       if (!target && code === 37) target = activeNav();
       if (!target && code === 39) target = active;
       if (!target && code === 40) { focusMemory.footerReturn = bookmark(content); target = document.getElementById("seek"); }
@@ -270,12 +290,17 @@
     var attrs = 'viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
     if (name === "delete") return '<svg ' + attrs + '><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/></svg>';
     if (name === "favorite") return '<svg ' + attrs + '><path d="M20.8 5.6a5.4 5.4 0 0 0-7.6 0L12 6.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 22l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"/></svg>';
+    if (name === "share") return '<svg ' + attrs + '><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.5-4.4M8.2 13.2l7.5 4.4"/></svg>';
+    if (name === "artist-info") return '<svg ' + attrs + '><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.7-3.4 3.1-5.2 7-5.2s6.3 1.8 7 5.2"/><circle cx="19" cy="18" r="3"/><path d="M19 16.6v2.8M17.6 18h2.8"/></svg>';
+    if (name === "artist") return '<svg ' + attrs + '><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.7-3.4 3.1-5.2 7-5.2s6.3 1.8 7 5.2"/></svg>';
+    if (name === "album") return '<svg ' + attrs + '><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>';
+    if (name === "link") return '<svg ' + attrs + '><path d="M10 13.5 8.2 15.3a3.5 3.5 0 0 1-5-5l2.5-2.5a3.5 3.5 0 0 1 5-.1"/><path d="m14 10.5 1.8-1.8a3.5 3.5 0 1 1 5 5l-2.5 2.5a3.5 3.5 0 0 1-5 .1"/><path d="m8.5 15.5 7-7"/></svg>';
     return '<svg ' + attrs + '><path d="M12 5v14M5 12h14"/></svg>';
   }
   function trackAction(action, icon, label, selected) { return '<button class="track-action focusable' + (selected ? ' is-selected' : '') + '" type="button" data-action="' + action + '" aria-label="' + label + '" title="' + label + '">' + songActionIcon(icon) + '</button>'; }
   function queueTrackAction(song) { var queued = isQueued(song); return trackAction("queue", queued ? "delete" : "queue", queued ? "从播放列表删除" : "加入播放列表", queued); }
   function track(song, index) {
-    var favorite = isFavorite(song), actions = "";
+    var favorite = isFavorite(song), actions = trackAction("artist-info", "artist-info", "查看歌手和专辑详情");
     if (state.page === "queue" && state.libraryView === "queue") actions += trackAction("remove-queue", "delete", "从播放列表删除");
     else actions += queueTrackAction(song);
     if (state.page === "favorites") actions += trackAction("remove-favorite", "delete", "从收藏删除");
@@ -323,6 +348,7 @@
         var target = event.target, action = null, i, list = source || state.songs;
         while (target && target !== el) { if (target.getAttribute && target.getAttribute("data-action")) { action = target.getAttribute("data-action"); break; } target = target.parentNode; }
         i = parseInt(el.getAttribute("data-song"), 10);
+        if (action === "artist-info") { openShareMenu(list[i]); event.stopPropagation(); return; }
         if (action === "queue") { toggleQueue(list[i]); event.stopPropagation(); return; }
         if (action === "favorite") { toggleFavorite(list[i]); event.stopPropagation(); return; }
         if (action === "remove-queue" || action === "remove-favorite") { removeLibrarySong(list[i], action, i); event.stopPropagation(); return; }
@@ -401,6 +427,144 @@
     });
   }
 
+  function firstArtist(song) { var list = song && (song.ar || song.artists), item; if (list && list.length) { item = list[0]; return typeof item === "string" ? {name: item} : item; } return {name: artist(song)}; }
+  function artistId(song) { var item = firstArtist(song); return item && (item.id || song && (song.artistId || song.artist_id)); }
+  function albumId(song) { var value = song && (song.al || song.album); return value && typeof value === "object" ? (value.id || value.albumId) : song && (song.albumId || song.album_id); }
+  function formatDate(value) { var date; if (!value) return "未知日期"; date = new Date(Number(value)); return isFinite(date.getTime()) ? date.getFullYear() + "-" + (date.getMonth() + 1 < 10 ? "0" : "") + (date.getMonth() + 1) + "-" + (date.getDate() < 10 ? "0" : "") + date.getDate() : "未知日期"; }
+  function restoreDetailSource(source) {
+    var target, page = source && source.page || "recommend", shareSong = source && source.share ? source.song : null;
+    state.detailKind = ""; state.detailReturn = null; state.artistDetail = null; state.albumDetail = null;
+    renderPage(page);
+    if (page === "search" && state.searchQuery) renderSearchResults(document.getElementById("search-results"));
+    target = source && source.trackId ? content.querySelector('.track-row[data-track-id="' + esc(source.trackId) + '"]') : null;
+    if (target && source.action) target = target.querySelector('[data-action="' + esc(source.action) + '"]') || target;
+    if (target) focusTarget(target);
+    if (shareSong) openShareMenu(shareSong);
+  }
+  function openShareMenu(song) {
+    var root = document.getElementById("modal-root"), previous = document.activeElement, html;
+    if (!root || !song) return;
+    state.shareMenu = {song: song, previous: previous}; state.modalPreviousFocus = previous; root.hidden = false; root.removeAttribute("data-exit-dialog");
+    html = '<div class="modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title"><button id="share-close" class="modal-close focusable" type="button" aria-label="关闭">×</button><h2 id="share-title">' + esc(songName(song)) + '</h2><p class="share-subtitle">' + esc(artist(song)) + ' · ' + esc(album(song)) + '</p><div class="share-actions"><button class="share-action focusable" data-share-action="artist" type="button">' + songActionIcon("artist") + '<span>歌手详情</span></button><button class="share-action focusable" data-share-action="album" type="button">' + songActionIcon("album") + '<span>专辑详情</span></button></div></div>';
+    root.innerHTML = html; syncCommentMotion();
+    document.getElementById("share-close").addEventListener("click", closeShareMenu);
+    each(root, "[data-share-action]", function (button) { button.addEventListener("click", function () { var action = button.getAttribute("data-share-action"); if (action === "artist") openArtistDetail(song); else if (action === "album") openAlbumDetail(song); }); });
+    var first = root.querySelector("[data-share-action]"); if (first) first.focus();
+  }
+  function findNeteaseSong(data, sourceSong) {
+    var result = data && data.result, songs = result && result.songs || [], wantedName = songName(sourceSong), wantedArtist = artist(sourceSong), i, item, names, j;
+    for (i = 0; i < songs.length; i++) {
+      item = songs[i]; names = item && (item.artists || item.ar);
+      if (songName(item) !== wantedName) continue;
+      if (!wantedArtist || !names || !names.length) return item;
+      for (j = 0; j < names.length; j++) if (String(names[j] && names[j].name || names[j]) === wantedArtist) return item;
+    }
+    return songs[0] || null;
+  }
+  function resolveNeteaseSong(sourceSong, done) {
+    var query = songName(sourceSong) || artist(sourceSong);
+    if (!query) { done(null); return; }
+    api("/api/netease/search?keyword=" + encodeURIComponent(query), "GET", null, function (err, data) { done(err ? null : findNeteaseSong(data, sourceSong)); });
+  }
+  function loadArtistById(id, source, song) {
+    api("/api/netease/artist?id=" + encodeURIComponent(id), "GET", null, function (err, data) {
+      if (state.detailKind !== "artist" || state.detailReturn !== source) return;
+      if (err || !data || !data.artist) { renderState((err && err.message) || "歌手详情加载失败", true); return; }
+      renderArtistDetail(data, song);
+    });
+  }
+  function closeShareMenu(restore) {
+    var root = document.getElementById("modal-root"), previous = state.shareMenu && state.shareMenu.previous;
+    if (!state.shareMenu) return;
+    state.shareMenu = null; state.modalPreviousFocus = null; root.hidden = true; root.innerHTML = ""; syncCommentMotion();
+    if (restore !== false && previous && document.body.contains(previous)) focusTarget(previous);
+  }
+  function openArtistDetail(song) {
+    var id = artistId(song), source = {kind: "source", page: state.page === "queue" ? "queue" : state.page, trackId: String(song.id), action: "artist-info", rowIndex: parseInt((document.activeElement && document.activeElement.parentNode && document.activeElement.parentNode.getAttribute("data-song")) || 0, 10), share: true, song: song};
+    closeShareMenu(false); state.detailKind = "artist"; state.detailReturn = source; content.scrollTop = 0; renderState("正在加载歌手详情…");
+    if (id) loadArtistById(id, source, song);
+    else resolveNeteaseSong(song, function (resolved) {
+      var resolvedID = artistId(resolved);
+      if (resolved) { song.ar = resolved.artists || resolved.ar; song.artists = resolved.artists || resolved.ar; song.al = resolved.album || resolved.al; song.album = resolved.album || resolved.album; }
+      if (resolvedID) loadArtistById(resolvedID, source, song); else renderState("未找到该歌曲的歌手详情", true);
+    });
+  }
+  function artistTabs(active) { return '<div class="detail-tabs"><button id="artist-hot-tab" class="tab focusable' + (active === "hot" ? ' is-active' : '') + '" type="button">热门歌曲</button><button id="artist-albums-tab" class="tab focusable' + (active === "albums" ? ' is-active' : '') + '" type="button">专辑</button></div>'; }
+  function artistHero(data) { var a = data.artist || {}, songs = Number(a.musicSize) || 0, albums = Number(a.albumSize) || 0, image = a.picUrl || a.img1v1Url; return '<section class="detail-hero artist-hero"><img src="' + esc(isUrl(image) ? image : cover(null)) + '" alt="' + esc(a.name || "歌手") + '"><div class="detail-hero-copy"><span class="detail-eyebrow">歌手详情</span><h1>' + esc(a.name || "未知歌手") + '</h1><p>' + esc(songs) + ' 首歌曲 · ' + esc(albums) + ' 张专辑</p>' + (a.alias && a.alias.length ? '<small>' + esc(a.alias.join(" · ")) + '</small>' : '') + '</div></section>'; }
+  function detailBackButton() { return nativeApp ? "" : '<button id="detail-back" class="back-button focusable" type="button">返回</button>'; }
+  function bindDetailBack() { var button = document.getElementById("detail-back"); if (button) button.addEventListener("click", handleBack); }
+  function renderArtistDetail(data, sourceSong) {
+    var a = data.artist || {}, songs = data.hotSongs || [], active = state.artistDetail && state.artistDetail.tab || "hot";
+    state.artistDetail = {data: data, sourceSong: sourceSong, artistId: a.id, tab: active};
+    content.innerHTML = detailBackButton() + artistHero(data) + artistTabs(active) + '<div id="artist-detail-body"></div>';
+    bindArtistDetail(); renderArtistDetailBody(); focusTarget(document.getElementById("detail-back") || document.getElementById(active === "albums" ? "artist-albums-tab" : "artist-hot-tab"));
+  }
+  function bindArtistDetail() {
+    bindDetailBack();
+    document.getElementById("artist-hot-tab").addEventListener("click", function () { state.artistDetail.tab = "hot"; renderArtistDetail(state.artistDetail.data, state.artistDetail.sourceSong); });
+    document.getElementById("artist-albums-tab").addEventListener("click", function () { state.artistDetail.tab = "albums"; state.artistAlbums = []; state.artistAlbumsOffset = 0; state.artistAlbumsMore = true; state.artistAlbumsError = ""; renderArtistDetail(state.artistDetail.data, state.artistDetail.sourceSong); loadArtistAlbums(false); });
+  }
+  function albumCard(item) { var image = item.picUrl || item.blurPicUrl; return '<button class="album-card focusable" type="button" data-album-id="' + esc(item.id) + '"><img src="' + esc(isUrl(image) ? image : cover(null)) + '" alt=""><strong>' + esc(item.name || "未命名专辑") + '</strong><span>' + esc(item.publishTime ? String(new Date(Number(item.publishTime)).getFullYear()) : "未知年份") + ' · ' + esc(item.size || 0) + ' 首</span></button>'; }
+  function renderArtistDetailBody() {
+    var box = document.getElementById("artist-detail-body"), detail = state.artistDetail, songs, html, savedFocus, scrollTop;
+    if (!box || !detail) return;
+    savedFocus = bookmark(content); scrollTop = content.scrollTop;
+    if (detail.tab === "albums") {
+      html = '<div class="detail-list-heading"><h2>全部专辑</h2><span>' + esc(state.artistAlbums.length ? state.artistAlbums.length + " 张已加载" : "下滑自动加载") + '</span></div><div id="artist-album-grid" class="album-grid">' + (state.artistAlbums.length ? state.artistAlbums.map(albumCard).join("") : '<div class="state">' + (state.artistAlbumsError ? esc(state.artistAlbumsError) : '正在加载专辑…') + '</div>') + '</div><div class="detail-pagination">' + (state.artistAlbumsError ? '<button id="artist-albums-retry" class="secondary-button focusable" type="button">重试加载</button>' : state.artistAlbumsLoading ? '<span>正在加载更多…</span>' : state.artistAlbumsMore ? '<span>继续下滑加载更多专辑</span>' : '<span>已显示全部专辑</span>') + '</div>';
+      box.innerHTML = html;
+      each(box, "[data-album-id]", function (button) { button.addEventListener("click", function () { openAlbumDetail({id: button.getAttribute("data-album-id"), album: {id: button.getAttribute("data-album-id"), name: button.querySelector("strong").textContent}, artist: detail.data.artist}); }); });
+      if (document.getElementById("artist-albums-retry")) document.getElementById("artist-albums-retry").addEventListener("click", function () { state.artistAlbumsError = ""; loadArtistAlbums(true); });
+    } else {
+      songs = detail.data.hotSongs || [];
+      html = '<div class="detail-list-heading"><h2>热门歌曲</h2><span>' + esc(songs.length + " 首") + '</span><button id="artist-play-hot" class="primary detail-play-hot focusable" type="button">' + controlIcon("play") + '<span>播放热门</span></button></div>' + (songs.length ? '<div class="track-list">' + songs.map(track).join("") + '</div>' : '<div class="empty">暂无热门歌曲</div>');
+      box.innerHTML = html; bindSongActions(box, songs);
+      document.getElementById("artist-play-hot").addEventListener("click", function () { if (songs.length) { state.playbackList = songs.slice(0); state.playbackListSource = "artist"; play(songs[0]); } });
+    }
+    if (savedFocus) restoreBookmark(content, savedFocus); else content.scrollTop = scrollTop;
+  }
+  function loadArtistAlbums(append) {
+    var detail = state.artistDetail, offset = append ? state.artistAlbumsOffset : 0, id, requestId;
+    if (!detail || state.artistAlbumsLoading || (append && (!state.artistAlbumsMore || state.artistAlbumsError))) return;
+    id = detail.artistId; requestId = ++state.artistAlbumsRequest; state.artistAlbumsLoading = true; state.artistAlbumsError = ""; renderArtistDetailBody();
+    api("/api/netease/artist/albums?id=" + encodeURIComponent(id) + "&offset=" + offset + "&limit=30", "GET", null, function (err, data) {
+      var items = data && (data.hotAlbums || data.albums || data.data) || [];
+      if (state.detailKind !== "artist" || state.artistDetail !== detail || requestId !== state.artistAlbumsRequest) return;
+      state.artistAlbumsLoading = false;
+      if (err) { state.artistAlbumsError = (err && err.message) || "专辑加载失败，请重试"; renderArtistDetailBody(); return; }
+      if (!append) state.artistAlbums = [];
+      state.artistAlbums = state.artistAlbums.concat(items); state.artistAlbumsOffset = offset + items.length;
+      state.artistAlbumsMore = data && typeof data.more === "boolean" ? data.more : items.length >= 30; state.artistAlbumsError = ""; renderArtistDetailBody();
+    });
+  }
+  function maybeLoadArtistAlbums() {
+    if (state.detailKind !== "artist" || !state.artistDetail || state.artistDetail.tab !== "albums" || !state.artistAlbumsMore || state.artistAlbumsLoading || state.artistAlbumsError || content.clientHeight <= 0) return;
+    if (content.scrollTop + content.clientHeight >= content.scrollHeight - Math.max(240, content.clientHeight * .55)) loadArtistAlbums(true);
+  }
+  function bindArtistAlbumsScroll() {
+    if (content.getAttribute("data-artist-albums-scroll-bound")) return;
+    content.setAttribute("data-artist-albums-scroll-bound", "true"); content.addEventListener("scroll", maybeLoadArtistAlbums);
+  }
+  function openAlbumDetail(song) {
+    var id = albumId(song), parent = state.detailKind === "artist" && state.artistDetail ? {kind: "artist", detail: state.artistDetail, albums: state.artistAlbums.slice(0), offset: state.artistAlbumsOffset, more: state.artistAlbumsMore, source: state.detailReturn, albumId: String(id || song.id)} : state.detailReturn;
+    var source = parent && parent.kind === "artist" ? parent : {kind: "source", page: state.page, trackId: String(song.id), action: "artist-info", share: true, song: song};
+    function load(id) { api("/api/netease/album?id=" + encodeURIComponent(id), "GET", null, function (err, data) { if (state.detailKind !== "album" || state.detailReturn !== source) return; if (err || !data || !(data.album || data.songs)) { renderState((err && err.message) || "专辑详情加载失败", true); return; } renderAlbumDetail(data); }); }
+    closeShareMenu(false); state.detailKind = "album"; state.detailReturn = source; content.scrollTop = 0; renderState("正在加载专辑详情…");
+    if (id) load(id);
+    else resolveNeteaseSong(song, function (resolved) {
+      var resolvedID = albumId(resolved);
+      if (resolved) { song.al = resolved.album || resolved.al; song.album = resolved.album || resolved.al; }
+      if (resolvedID) load(resolvedID); else renderState("未找到该歌曲的专辑详情", true);
+    });
+  }
+  function renderAlbumDetail(data) {
+    var a = data.album || {}, songs = data.songs || [], artistName = a.artist && a.artist.name || (a.artists && a.artists[0] && a.artists[0].name) || "未知歌手", image = a.picUrl || a.blurPicUrl;
+    state.albumDetail = {data: data, songs: songs};
+    content.innerHTML = detailBackButton() + '<section class="detail-hero album-hero"><img src="' + esc(isUrl(image) ? image : cover(null)) + '" alt="' + esc(a.name || "专辑") + '"><div class="detail-hero-copy"><span class="detail-eyebrow">专辑详情</span><h1>' + esc(a.name || "未命名专辑") + '</h1><p>' + esc(artistName) + ' · ' + esc(formatDate(a.publishTime)) + ' · ' + esc(a.size || songs.length) + ' 首</p><small>' + esc((a.description || "").replace(/\s+/g, " ").slice(0, 180)) + '</small></div></section><div class="detail-list-heading"><h2>专辑歌曲</h2><span>' + esc(songs.length) + ' 首</span><button id="album-play" class="primary detail-play-hot focusable" type="button">' + controlIcon("play") + '<span>播放专辑</span></button></div><div id="album-detail-body" class="track-list">' + (songs.length ? songs.map(track).join("") : '<div class="empty">暂无歌曲</div>') + '</div>';
+    bindDetailBack();
+    document.getElementById("album-play").addEventListener("click", function () { if (songs.length) { state.playbackList = songs.slice(0); state.playbackListSource = "album"; play(songs[0]); } });
+    bindSongActions(document.getElementById("album-detail-body"), songs); focusTarget(document.getElementById("detail-back") || document.getElementById("album-play"));
+  }
+
   function renderRankingCards(items) { var savedFocus = bookmark(content), box = document.getElementById("playlist-body"); if (!box) return; box.innerHTML = items.map(playlistCard).join(""); bindPlaylistActions(box, "playlists"); restoreBookmark(content, savedFocus); }
   function loadRanking() { var requestBox = document.getElementById("playlist-body"), definitions = rankingDefinitions(), pending = definitions.length, i; renderRankingCards(definitions); for (i = 0; i < definitions.length; i++) (function (index) { api("/api/music/list", "POST", "id=" + encodeURIComponent(definitions[index].id) + "&type=wy", function (err, data) { var playlist = data && data.data && data.data.playlist; if (!err && playlist) { definitions[index] = {id: String(playlist.id || definitions[index].id), name: playlist.name || definitions[index].name, coverImgUrl: playlist.coverImgUrl || "", trackCount: playlist.trackCount || definitions[index].trackCount, creator: {nickname: "网易云"}}; } pending -= 1; if (!pending && state.page === "playlists" && !state.detailReturn && requestBox === document.getElementById("playlist-body")) renderRankingCards(definitions); }); }(i)); }
   function renderPlaylists() { content.innerHTML = pageTitle("排行榜", "网易云官方榜单") + '<div id="playlist-body" class="playlist-grid"><div class="state">正在加载排行榜…</div></div>'; loadRanking(); }
@@ -429,7 +593,7 @@
     if (loggedIn) document.getElementById("account-logout").addEventListener("click", logout);
     else { document.getElementById("account-scan-login").onclick = function () { openScan("login"); }; document.getElementById("account-scan-register").onclick = function () { openScan("register"); }; document.getElementById("account-login").addEventListener("click", function () { openLogin("login"); }); document.getElementById("account-register").addEventListener("click", function () { openLogin("register"); }); document.getElementById("account-reset").addEventListener("click", function () { openLogin("reset"); }); }
    restoreBookmark(content, savedFocus); }
-  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
+  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
   function toggleQueue(song) {
     if (!song) return;
     if (isQueued(song)) removeQueuedSong(song);
@@ -458,6 +622,23 @@
     lines.sort(function (a, b) { return a.time - b.time; });
     return lines;
   }
+  function parseWordLyrics(payload) {
+    var source = payload && typeof payload.data === "string" ? payload.data : payload && payload.data && typeof payload.data === "object" ? payload.data.lyric : payload && payload.lyric;
+    var rows = String(source || "").split(/\r?\n/), lines = [], i, row, lineMatch, tokenRe, token, words, lineTime, lineText;
+    for (i = 0; i < rows.length; i++) {
+      row = rows[i]; lineMatch = /^\[(\d+),(\d+)\](.*)$/.exec(row);
+      if (!lineMatch) continue;
+      lineTime = Number(lineMatch[1]) / 1000; lineText = lineMatch[3] || ""; words = [];
+      tokenRe = /\((\d+),(\d+),[^)]*\)([\s\S]*?)(?=\(\d+,\d+,[^)]*\)|$)/g; token = tokenRe.exec(lineText);
+      while (token) {
+        if (token[3]) words.push({time: Number(token[1]) / 1000, end: (Number(token[1]) + Number(token[2])) / 1000, text: token[3]});
+        token = tokenRe.exec(lineText);
+      }
+      if (words.length) lines.push({time: lineTime, text: words.map(function (word) { return word.text; }).join(""), words: words});
+    }
+    lines.sort(function (a, b) { return a.time - b.time; });
+    return lines;
+  }
   function commentItems(data) {
     var items = data && (data.comments || data.hotComments || data.data || data.items) || [];
     if (items && items.comments) items = items.comments;
@@ -469,7 +650,56 @@
   function commentMarkup(items, startIndex) { return items.length ? items.map(function (x, index) { var user = x.user && (x.user.nickname || x.user.name) || x.user || x.nickname || "音乐用户", profile = typeof x.user === "object" ? x.user : null, meta = commentTime(x), likes = x.likedCount ? " · " + x.likedCount + " 赞" : ""; return '<div class="comment focusable" tabindex="0" data-comment-index="' + ((startIndex || 0) + index) + '"><img class="comment-avatar" src="' + esc(commentAvatar(x, profile)) + '" alt=""><div class="comment-body"><div class="comment-meta"><strong>' + esc(user) + '</strong>' + (meta || likes ? '<span>' + esc(meta) + esc(likes) + '</span>' : '') + '</div><p>' + esc(x.content || x.comment || x.text || "") + '</p></div></div>'; }).join("") : '<div class="state">暂无评论</div>'; }
   function commentDisplayCount() { return state.commentsTotal ? String(state.commentsTotal) : (state.commentsLoading ? "…" : String(state.comments.length)); }
   function updateCommentCount() { var total = state.commentsTotal || 0, count = document.getElementById("comment-count"), sideCount = document.getElementById("side-comment-count"), toggle = document.getElementById("player-comments-toggle"); if (count) { count.textContent = total ? String(total) : (state.commentsLoading ? "…" : String(state.comments.length)); count.parentNode.setAttribute("aria-label", "评论 " + (total || state.comments.length) + " 条"); } if (sideCount) sideCount.textContent = total ? state.comments.length + "/" + total + " 条" : (state.commentsLoading ? "加载中…" : state.comments.length + " 条"); if (toggle && state.commentsHidden) renderCommentsVisibility(); }
-  function lyricMarkup() { return state.lyricLines.length ? state.lyricLines.map(function (line, index) { return '<div class="lyric-line' + (index === state.lyricIndex ? ' active' : '') + '" data-lyric-index="' + index + '">' + esc(line.text) + '</div>'; }).join("") : '<div class="state">' + esc(state.lyricsText || "暂无歌词") + '</div>'; }
+  function lyricMarkup() { return state.lyricLines.length ? state.lyricLines.map(function (line, index) { var timed = line.words && line.words.length, text = timed ? line.words.map(function (word, wordIndex) { return '<span class="lyric-word" data-word-index="' + wordIndex + '">' + esc(word.text) + '</span>'; }).join("") : esc(line.text); return '<div class="lyric-line' + (timed ? ' has-word-timing' : '') + (index === state.lyricIndex ? ' active' : '') + '" data-lyric-index="' + index + '">' + text + '</div>'; }).join("") : '<div class="state">' + esc(state.lyricsText || "暂无歌词") + '</div>'; }
+  function renderOverlayLyrics() {
+    var root = document.getElementById("overlay-lyrics"), four = state.commentsHidden && !!state.lyricLines.length, markup;
+    if (!root) return;
+    root.classList.toggle("lyrics-four-line", four);
+    if (overlayLyricView.lines === state.lyricLines && overlayLyricView.message === state.lyricsText && overlayLyricView.four === four) return;
+    markup = state.current && !state.lyricsLoaded && !state.lyricLines.length ? '<div class="state lyric-loading" role="status"><span class="loading-ring" aria-hidden="true"></span><span>正在加载歌词…</span></div>' : lyricMarkup();
+    // Retain every timed line. A padded, clipped track puts the current line
+    // in slot two, including the start/end of a song, without duplicating it.
+    root.innerHTML = four ? '<div class="four-lyric-track"><div class="lyric-spacer" aria-hidden="true"></div>' + markup + '<div class="lyric-spacer" aria-hidden="true"></div><div class="lyric-spacer" aria-hidden="true"></div></div>' : markup;
+    overlayLyricView.lines = state.lyricLines; overlayLyricView.message = state.lyricsText; overlayLyricView.four = four;
+    overlayLyricView.width = 0; overlayLyricView.height = 0; overlayLyricView.index = -1; overlayLyricView.time = null;
+    if (four) root.scrollTop = 0;
+  }
+  function updateFourLineLyrics(index, time, force) {
+    var root = document.getElementById("overlay-lyrics"), track, width, height, rowHeight, resized, animate, nodes, i, lineIndex, font, desired, measured, family;
+    if (!root || !overlayLyricView.four || !state.playerOpen || index < 0) return;
+    track = root.querySelector(".four-lyric-track"); width = root.clientWidth; height = root.clientHeight;
+    if (!track || width <= 0 || height <= 0) return;
+    resized = width !== overlayLyricView.width || height !== overlayLyricView.height;
+    if (force || resized || index !== overlayLyricView.index) {
+      rowHeight = height / 4; family = window.getComputedStyle(root).fontFamily;
+      if (!overlayLyricView.measure) { try { overlayLyricView.measure = document.createElement("canvas").getContext("2d"); } catch (ignore) {} }
+      nodes = track.children;
+      for (i = 0; i < nodes.length; i++) {
+        nodes[i].style.height = rowHeight + "px"; nodes[i].style.lineHeight = rowHeight + "px";
+        lineIndex = parseInt(nodes[i].getAttribute("data-lyric-index"), 10);
+        if (isNaN(lineIndex)) continue;
+        nodes[i].classList.toggle("four-previous", lineIndex === index - 1);
+        nodes[i].classList.toggle("four-next", lineIndex === index + 1);
+        nodes[i].classList.toggle("four-last", lineIndex === index + 2);
+        desired = lineIndex === index ? Math.min(92, rowHeight * .6) : Math.min(62, rowHeight * .4);
+        if (overlayLyricView.measure) {
+          overlayLyricView.measure.font = (lineIndex === index ? "700 " : "400 ") + desired + "px " + family;
+          measured = overlayLyricView.measure.measureText(state.lyricLines[lineIndex].text).width;
+        } else measured = state.lyricLines[lineIndex].text.length * desired;
+        font = Math.min(desired, desired * Math.max(1, width - 32) / Math.max(1, measured));
+        nodes[i].style.fontSize = Math.floor(font * 10) / 10 + "px";
+      }
+      animate = !force && !resized && index === overlayLyricView.index + 1 && overlayLyricView.time != null && time >= overlayLyricView.time && time - overlayLyricView.time < 2 && state.playbackStatus === "playing" && !playbackPaused() && !document.hidden && !commentMotion.background;
+      track.style.transition = animate ? "transform .45s cubic-bezier(.22,.68,.26,1)" : "none";
+      track.style.transform = "translateY(" + (-index * rowHeight) + "px)";
+      root.scrollTop = 0;
+      overlayLyricView.width = width; overlayLyricView.height = height; overlayLyricView.index = index;
+    }
+    // A paused/buffering player cannot leave a scrolling animation running.
+    if (state.playbackStatus !== "playing" || playbackPaused()) track.style.transition = "none";
+    overlayLyricView.time = time;
+  }
+  function stopLyricMotion() { var track = document.querySelector("#overlay-lyrics .four-lyric-track"); if (track) track.style.transition = "none"; }
   function loadMoreComments(root) {
     if (!root || !state.playerOpen || state.commentsHidden || root.clientHeight <= 0 || state.commentsLoading || Date.now() < state.commentsRetryAt) return;
     if (state.commentsError && !state.comments.length) loadCommentsPage(0, state.playToken);
@@ -538,7 +768,7 @@
     side.innerHTML = '<div id="side-lyrics" class="lyrics" tabindex="-1" aria-label="同步歌词">' + lyricMarkup() + '</div>';
     lyricsBox = document.getElementById("side-lyrics");
     if (lyricsBox) lyricsBox.scrollTop = lyricScroll; restoreBookmark(side, savedFocus);
-    updateLyrics(playbackPosition());
+    updateLyrics(playbackPosition(), true);
   }
   function modeIcon(mode) {
     var attrs = 'viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
@@ -584,27 +814,33 @@
     stopCommentMotion();
     if (!state.commentsHidden) state.commentsScroll = comments.scrollTop;
     state.commentsHidden = !state.commentsHidden; renderCommentsVisibility();
+    renderOverlayLyrics();
     if (!state.commentsHidden) comments.scrollTop = state.commentsScroll;
-    focusTarget(button); scrollLyricIntoView(document.querySelector("#overlay-lyrics .lyric-line.active"));
+    // Force the grid to settle before centering the active line after the
+    // comment column is hidden or restored on older WebViews.
+    var panel = document.querySelector(".player-detail-panel"); if (panel) panel.offsetHeight;
+    focusTarget(button);
+    updateLyrics(playbackPosition(), true);
     if (!state.commentsHidden && state.current && !state.commentsLoaded && !state.commentsLoading) loadCommentsPage(0, state.playToken);
     syncCommentMotion();
   }
   function setPlaybackButtonState(playing) { setControlIcon("play", playing ? "pause" : "play", playing ? "暂停" : "播放"); setControlIcon("overlay-play", playing ? "pause" : "play", playing ? "暂停" : "播放"); }
   function renderPlayMode() { var info = playModeInfo(), mode = document.getElementById("play-mode"), repeat = document.getElementById("player-repeat"); if (mode) { mode.innerHTML = modeIcon(state.playMode) + '<span>' + info.label + '</span>'; mode.title = "播放顺序：" + info.label; mode.setAttribute("aria-label", "播放顺序：" + info.label); } if (repeat) { repeat.innerHTML = modeIcon(state.playMode); repeat.title = "播放顺序：" + info.label; repeat.setAttribute("aria-label", "切换播放顺序，当前为" + info.label); repeat.classList.toggle("is-on", state.playMode !== "list"); } }
   function renderPlayerOverlay() {
-    var overlay = document.getElementById("player-overlay"), song = state.current, title = document.getElementById("overlay-title"), coverNode = document.getElementById("overlay-cover"), lyrics = document.getElementById("overlay-lyrics"), comments = document.getElementById("overlay-comments"), status = document.getElementById("lyric-status");
+    var overlay = document.getElementById("player-overlay"), song = state.current, title = document.getElementById("overlay-title"), metadata = document.getElementById("overlay-track-meta"), coverNode = document.getElementById("overlay-cover"), coverUrl, lyrics = document.getElementById("overlay-lyrics"), comments = document.getElementById("overlay-comments"), status = document.getElementById("lyric-status"), lyricScroll = lyrics ? lyrics.scrollTop : 0;
     if (!overlay) return;
-    if (song) { title.textContent = songName(song); coverNode.src = cover(song); }
+    if (song) { title.textContent = songName(song); title.title = songName(song); coverUrl = fullscreenCover(song); if (coverNode.getAttribute("src") !== coverUrl) coverNode.src = coverUrl; }
+    metadata.textContent = song ? artist(song) + " · " + album(song) : ""; metadata.title = metadata.textContent; metadata.hidden = !song;
     renderOverlayFavorite(); renderCommentsVisibility();
-    lyrics.innerHTML = lyricMarkup(); renderOverlayComments(comments, song);
+    renderOverlayLyrics(); if (!overlayLyricView.four) lyrics.scrollTop = lyricScroll; renderOverlayComments(comments, song);
     if (state.playbackStatus === "failed") {
       status.textContent = playbackErrorText();
       status.hidden = false;
     } else {
       status.textContent = state.lyricLines.length ? "" : (song ? (state.lyricsLoaded ? "暂无歌词" : "正在加载歌词…") : "等待播放");
-      status.hidden = !!state.lyricLines.length;
+      status.hidden = true;
     }
-    renderPlayMode(); updateCommentCount(); bindCommentScroll(comments); bindFocusScroll(comments); updateLyrics(playbackPosition()); syncCommentMotion();
+    renderPlayMode(); updateCommentCount(); bindCommentScroll(comments); bindFocusScroll(comments); updateLyrics(playbackPosition(), true); syncCommentMotion();
   }
   function playbackErrorText() {
     if (playback.errorKind === "network") return "播放源网络异常，请稍后重试";
@@ -623,17 +859,29 @@
     max = container.scrollHeight - container.clientHeight;
     container.scrollTop = Math.max(0, Math.min(max, target));
   }
-  function updateLyrics(time) {
-    var next = -1, i, nodes, active;
+  function updateLyrics(time, force) {
+    var next = -1, i, nodes, active, changed, line, wordNodes, j, word, progress;
     for (i = 0; i < state.lyricLines.length; i++) { if (state.lyricLines[i].time >= 0 && state.lyricLines[i].time <= time) next = i; }
     // Keep the first lyric visibly selected before the first timed line begins
     // or while a WebView has not produced its first timeupdate event yet.
     if (next < 0 && state.lyricLines.length) next = 0;
-    state.lyricIndex = next; nodes = document.querySelectorAll("#overlay-lyrics .lyric-line, #side-lyrics .lyric-line"); for (i = 0; i < nodes.length; i++) nodes[i].classList.toggle("active", parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next);
+    changed = !!force || next !== state.lyricIndex; state.lyricIndex = next;
+    nodes = document.querySelectorAll("#overlay-lyrics .lyric-line, #side-lyrics .lyric-line");
+    for (i = 0; i < nodes.length; i++) {
+      nodes[i].classList.toggle("active", parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next);
+      line = state.lyricLines[parseInt(nodes[i].getAttribute("data-lyric-index"), 10)];
+      wordNodes = nodes[i].querySelectorAll(".lyric-word");
+      for (j = 0; j < wordNodes.length; j++) {
+        word = line && line.words && line.words[j]; progress = !word || time <= word.time ? 0 : time >= word.end ? 100 : Math.max(0, Math.min(100, (time - word.time) / Math.max(.001, word.end - word.time) * 100));
+        wordNodes[j].style.setProperty("--word-progress", progress + "%");
+      }
+    }
+    updateFourLineLyrics(next, time, force);
+    if (!changed) return;
     active = next >= 0 ? document.querySelector('#overlay-lyrics .lyric-line[data-lyric-index="' + next + '"]') : null;
-    if (!active || active.parentNode !== document.activeElement) scrollLyricIntoView(active);
+    if (!overlayLyricView.four) scrollLyricIntoView(active);
     active = next >= 0 ? document.querySelector('#side-lyrics .lyric-line[data-lyric-index="' + next + '"]') : null;
-    if (!active || active.parentNode !== document.activeElement) scrollLyricIntoView(active);
+    scrollLyricIntoView(active);
   }
   function loadCommentsPage(page, token, append) {
     var song = state.current, offset, shouldAppend = !!append && page > 0, requestToken = state.playToken, settled = false;
@@ -656,7 +904,9 @@
     });
   }
   function loadLyricsComments(song, token) {
-    api("/api/music/lrc", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=wy", function (err, data) { var text = err ? "歌词暂不可用" : (data && data.data || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; state.lyricLines = parseLyrics(text); state.lyricIndex = -1; renderSidePanel(); renderPlayerOverlay(); });
+    var id = encodeURIComponent(song.id || "");
+    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderSidePanel(); renderPlayerOverlay(); });
+    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderSidePanel(); renderPlayerOverlay(); updateLyrics(playbackPosition(), true); });
     state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; loadCommentsPage(0, token);
   }
   function playbackItems() {
@@ -672,7 +922,7 @@
   function selectTrack(song, position, duration, fromNative) {
     if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
     playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
-    state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
+    state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.lyricsWordLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
     document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderSidePanel(); renderPlayerOverlay(); syncProgress();
     loadLyricsComments(song, state.playToken);
     if (nativePlayer && !fromNative) { nativePendingSelection = ++nativeSelection; nativePlayer.command("select", JSON.stringify(nativeSnapshot())); }
@@ -723,7 +973,8 @@
     var html = "", i, song, actions, favorite;
     for (i = 0; i < items.length; i++) {
       song = items[i]; favorite = isFavorite(song);
-      actions = state.playbackListSource === "queue" ? trackAction("remove-queue", "delete", "从播放列表删除") : queueTrackAction(song);
+      actions = trackAction("artist-info", "artist-info", "查看歌手和专辑详情");
+      actions += state.playbackListSource === "queue" ? trackAction("remove-queue", "delete", "从播放列表删除") : queueTrackAction(song);
       actions += trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
       html += songRowMarkup(song, i, actions, true);
     }
@@ -754,6 +1005,7 @@
       el.addEventListener("click", function (event) {
         var node = event.target, action = null, index = parseInt(el.getAttribute("data-song"), 10), song = items[index], top = popup.querySelector(".queue-popup-list").scrollTop;
         while (node && node !== el) { if (node.getAttribute && node.getAttribute("data-action")) { action = node.getAttribute("data-action"); break; } node = node.parentNode; }
+        if (action === "artist-info") { openShareMenu(song); return; }
         if (action === "queue") { toggleQueue(song); return; }
         if (action === "favorite") { toggleFavorite(song); return; }
         if (action === "remove-queue" && state.playbackListSource === "queue") {
@@ -844,7 +1096,7 @@
       finishAuth(mode);
     });
   }
-  function closeLogin() { if (state.scan) { closeScan(); return; } var root = document.getElementById("modal-root"), previous = state.modalPreviousFocus, fallback; state.exitDialog = false; root.removeAttribute("data-exit-dialog"); root.hidden = true; root.innerHTML = ""; state.modalPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else if (state.page === "account") { fallback = document.getElementById(state.authenticated ? "account-logout" : "account-login"); if (fallback) fallback.focus(); } syncCommentMotion(); }
+  function closeLogin() { if (state.scan) { closeScan(); return; } if (state.shareMenu) { closeShareMenu(); return; } var root = document.getElementById("modal-root"), previous = state.modalPreviousFocus, fallback; state.exitDialog = false; root.removeAttribute("data-exit-dialog"); root.hidden = true; root.innerHTML = ""; state.modalPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else if (state.page === "account") { fallback = document.getElementById(state.authenticated ? "account-logout" : "account-login"); if (fallback) fallback.focus(); } syncCommentMotion(); }
   function openExitConfirm() {
     var root = document.getElementById("modal-root"), cancel, confirm;
     if (!root || !root.hidden) return;
@@ -948,19 +1200,21 @@
   }
   function handleBack() {
     var modal = document.getElementById("modal-root");
-    if (!modal.hidden) { if (state.exitDialog) closeExitConfirm(); else closeLogin(); return true; }
+    if (!modal.hidden) { if (state.exitDialog) closeExitConfirm(); else if (state.shareMenu) closeShareMenu(); else closeLogin(); return true; }
     if (state.queueOpen) { closeQueuePopup(); return true; }
     if (state.playerOpen) { closePlayerOverlay(); return true; }
+    if (state.detailKind === "album") { var albumParent = state.detailReturn, albumCard; if (albumParent && albumParent.kind === "artist") { state.detailKind = "artist"; state.detailReturn = albumParent.source || albumParent.detail.source; state.artistDetail = albumParent.detail; state.artistAlbums = albumParent.albums; state.artistAlbumsOffset = albumParent.offset; state.artistAlbumsMore = albumParent.more; renderArtistDetail(albumParent.detail.data, albumParent.detail.sourceSong); albumCard = albumParent.albumId && content.querySelector('[data-album-id="' + esc(albumParent.albumId) + '"]'); if (albumCard) focusTarget(albumCard); } else restoreDetailSource(albumParent); return true; }
+    if (state.detailKind === "artist") { restoreDetailSource(state.detailReturn); return true; }
     if (state.detailReturn) { var back = state.detailReturn; renderPage(back.page); state.returnPlaylist = {id: back.id, page: back.page, anchor: document.activeElement}; restorePlaylistReturn(content); return true; }
     if (state.page !== "recommend") { renderPage("recommend"); document.getElementById("nav-recommend").focus(); return true; }
     openExitConfirm(); return true;
   }
   window.MingmingTVBack = handleBack;
-  window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) closeScan(); };
+  window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); stopLyricMotion(); if (state.scan) closeScan(); };
   window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); syncCommentMotion(); };
   document.addEventListener("visibilitychange", function () { if (document.hidden) window.MingmingTVBackground(); else window.MingmingTVForeground(); });
   window.addEventListener("pageshow", window.MingmingTVForeground);
-  window.addEventListener("resize", syncCommentMotion);
+  window.addEventListener("resize", function () { syncCommentMotion(); updateLyrics(playbackPosition(), true); });
   window.addEventListener("pagehide", function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) { closeScan(); var xhr = new XMLHttpRequest(); xhr.open("POST", "/api/scan/cancel", false); try { xhr.send(); } catch (ignore) {} } });
 
   function logout() {
@@ -998,7 +1252,7 @@
     playback.position = time;
     if (nativePlayer) { nativePlayer.command("seek", String(time)); playback.pendingSeek = null; }
     else if (playback.sourceReady) audio.currentTime = time; else playback.pendingSeek = time;
-    syncProgress(time); updateLyrics(time); savePlayback();
+    syncProgress(time); updateLyrics(time, true); savePlayback();
   }
   function finishSeek() {
     var input = state.seekInput, time;
@@ -1036,7 +1290,7 @@
     document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("player-duration").textContent = duration;
     document.getElementById("overlay-elapsed").textContent = elapsed; document.getElementById("overlay-duration").textContent = duration;
   }
-  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (changed) updateTrackStates(); if (status === "failed") { var label = document.getElementById("lyric-status"); if (label) { label.textContent = playbackErrorText(); label.hidden = false; } } syncCommentMotion(); }
+  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (status !== "playing") stopLyricMotion(); if (changed) updateTrackStates(); if (status === "failed") { var label = document.getElementById("lyric-status"); if (label) { label.textContent = playbackErrorText(); label.hidden = false; } } syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
   audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });
@@ -1058,5 +1312,5 @@
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
   document.addEventListener("keydown", function (e) { if (e.keyCode === 27 || e.keyCode === 4) { if (handleBack()) e.preventDefault(); return; } if (e.keyCode === 37 || e.keyCode === 38 || e.keyCode === 39 || e.keyCode === 40 || e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 66) { e.preventDefault(); moveFocus(e.keyCode); } });
 
-  renderControlIcons(); renderPlayMode(); loadSearchHistory(); api("/health", "GET", null, function (err, data) { var dot = document.getElementById("connection-dot"), label = document.getElementById("connection-label"); if (!err && data) { dot.className = "status-dot ready"; label.textContent = data.capabilities && data.capabilities.fixture ? "预览数据" : "在线音乐"; state.fixture = !!(data.capabilities && data.capabilities.fixture); } else label.textContent = "服务连接失败"; }); loadLibrary(); loadPlayback(); renderPage("recommend"); focusInitial();
+  bindArtistAlbumsScroll(); renderControlIcons(); renderPlayMode(); loadSearchHistory(); api("/health", "GET", null, function (err, data) { var dot = document.getElementById("connection-dot"), label = document.getElementById("connection-label"); if (!err && data) { dot.className = "status-dot ready"; label.textContent = data.capabilities && data.capabilities.fixture ? "预览数据" : "在线音乐"; state.fixture = !!(data.capabilities && data.capabilities.fixture); } else label.textContent = "服务连接失败"; }); loadLibrary(); loadPlayback(); renderPage("recommend"); focusInitial();
 }());
