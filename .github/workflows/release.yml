@@ -73,7 +73,7 @@ jobs:
         run: |
           python3 scripts/verify_apk.py android/app/build/outputs/apk/release/app-release.apk
           python3 scripts/generate_release.py --apk android/app/build/outputs/apk/release/app-release.apk --out "$RUNNER_TEMP/mingming-release"
-      - name: Publish private Release with APK, update.json and SHA256SUMS
+      - name: Publish Release with APK, update.json and SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/publish_release.py --directory "$RUNNER_TEMP/mingming-release" --commit "$GITHUB_SHA"

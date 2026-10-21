@@ -20,7 +20,7 @@ apk = args.out / name
 shutil.copyfile(args.apk, apk)
 sha = hashlib.sha256(apk.read_bytes()).hexdigest()
 assert sha == report['sha256']
-repository = config.get('publicReleaseRepository') or config['privateRepository']
+repository = config.get('publicReleaseRepository') or config['repository']
 notes = Path('docs/releases/v' + config['versionName'] + '.md').read_text().strip()
 manifest = {'schema': 1, 'package_name': config['applicationId'],
             'version_code': config['versionCode'], 'version_name': config['versionName'],

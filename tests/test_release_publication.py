@@ -35,9 +35,7 @@ class ReleasePublicationTest(unittest.TestCase):
                 calls.append(command)
                 endpoint = next(a for a in command if a.startswith(('repos/', 'https://uploads.')))
                 method = command[command.index('--method') + 1] if '--method' in command else 'GET'
-                if endpoint == 'repos/' + config['privateRepository']:
-                    response = {'private': True}
-                elif endpoint.endswith('/git/ref/tags/' + tag):
+                if endpoint.endswith('/git/ref/tags/' + tag):
                     response = {'object': {'type': 'commit', 'sha': commit}}
                 elif endpoint.endswith('releases?per_page=100'):
                     response = [] if scenario == 'lag' else [copy.deepcopy(release)]
@@ -69,6 +67,10 @@ class ReleasePublicationTest(unittest.TestCase):
                     with self.assertRaises(AssertionError):
                         runpy.run_path(str(ROOT / 'scripts/publish_release.py'), run_name='__main__')
                     self.assertFalse(any('--method' in call for call in calls))
+                    self.assertFalse(any(
+                        call[2:] == ['repos/' + config['repository']]
+                        for call in calls if len(call) >= 3
+                    ))
                     return
                 runpy.run_path(str(ROOT / 'scripts/publish_release.py'), run_name='__main__')
             self.assertFalse(release['draft'])

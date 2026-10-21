@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish verified private release bytes; never replace an existing asset."""
+"""Publish verified release bytes; never replace an existing asset."""
 import argparse
 import hashlib
 import json
@@ -17,8 +17,7 @@ parser.add_argument('--commit', required=True)
 args = parser.parse_args()
 assert re.fullmatch(r'[0-9a-f]{40}', args.commit)
 config = json.loads(Path('app.json').read_text())
-repo = config['privateRepository']
-assert json.loads(gh('api', 'repos/' + repo))['private'], 'source repository must remain private'
+repo = config['repository']
 manifest = json.loads((args.directory / 'update.json').read_text())
 assert manifest['package_name'] == config['applicationId']
 assert manifest['version_code'] == config['versionCode']
@@ -73,4 +72,4 @@ assert not release['draft'] and release['tag_name'] == tag
 assert release['target_commitish'] == args.commit
 tag_ref = json.loads(gh('api', 'repos/' + repo + '/git/ref/tags/' + tag))
 assert tag_ref['object']['type'] == 'commit' and tag_ref['object']['sha'] == args.commit
-print('Published verified private release:', tag)
+print('Published verified release:', tag)
