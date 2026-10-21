@@ -44,7 +44,8 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
       const active = document.querySelector('#overlay-lyrics .active').getBoundingClientRect();
       const lyricTitle = document.querySelector('.lyric-badge').getBoundingClientRect();
       const commentTitle = document.querySelector('.comment-badge').getBoundingClientRect();
-      return {width: lyric.width, height: lyric.height, toggle: [toggle.x, toggle.y, toggle.width, toggle.height], activeVisible: active.top >= lyric.top - 1 && active.bottom <= lyric.bottom + 1, lyricTitleCenter: lyricTitle.top + lyricTitle.height / 2, commentTitleCenter: commentTitle.top + commentTitle.height / 2, commentTitleRight: commentTitle.right};
+      const scale = window.__tvScale || 1;
+      return {width: lyric.width / scale, height: lyric.height / scale, toggle: [toggle.x / scale, toggle.y / scale, toggle.width / scale, toggle.height / scale], activeVisible: active.top >= lyric.top - 1 && active.bottom <= lyric.bottom + 1, lyricTitleCenter: (lyricTitle.top + lyricTitle.height / 2) / scale, commentTitleCenter: (commentTitle.top + commentTitle.height / 2) / scale, commentTitleRight: commentTitle.right / scale};
     });
     async function capture(state) {
       if (!screenshotsDir) return;
@@ -64,10 +65,8 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
       const shown = await rects(), shownIcon = await button.innerHTML();
       const toggleCenter = shown.toggle[1] + shown.toggle[3] / 2;
       assert.ok(Math.abs(toggleCenter - shown.lyricTitleCenter) < 1, 'toggle aligns with the lyric heading');
-      if (size.width > 1050) {
-        assert.ok(Math.abs(toggleCenter - shown.commentTitleCenter) < 1, 'toggle aligns with the comment heading');
-        assert.ok(shown.toggle[0] - shown.commentTitleRight >= 16, 'comment title has space before the toggle');
-      }
+      assert.ok(Math.abs(toggleCenter - shown.commentTitleCenter) < 1, 'toggle aligns with the comment heading');
+      assert.ok(shown.toggle[0] - shown.commentTitleRight >= 16, 'comment title has space before the toggle');
       await capture('shown');
       await button.click();
       assert.equal(await focus(), 'player-comments-toggle');
@@ -82,7 +81,7 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
       assert.equal(hidden.toggle[0] + hidden.toggle[2], shown.toggle[0] + shown.toggle[2], 'toggle keeps its fixed right edge');
       assert.ok(hidden.toggle[2] > shown.toggle[2], 'hidden comments use the wider comment pill');
       assert.ok(Math.abs(hidden.toggle[1] + hidden.toggle[3] / 2 - hidden.lyricTitleCenter) < 1, 'hidden comments retain heading alignment');
-      assert.ok(size.width > 1050 ? hidden.width > shown.width + 100 : hidden.height > shown.height + 100, 'lyrics fill the vacated comment space');
+      assert.ok(hidden.width > shown.width + 100, 'lyrics fill the vacated comment space on the fixed 16:9 canvas');
       assert.equal(hidden.activeVisible, true, 'resizing keeps the active lyric visible');
       const count = requests.length;
       await comments.evaluate(el => {el.scrollTop = 99999; el.dispatchEvent(new Event('scroll'));});

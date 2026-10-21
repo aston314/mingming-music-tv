@@ -1,5 +1,11 @@
 (function () {
   "use strict";
+  // TV 固定画布被整体缩放后,getBoundingClientRect 返回的是缩放后的像素,
+  // 而 clientHeight/scrollTop 仍是画布像素。统一换算回画布像素再比较。
+  function rectOf(node) {
+    var r = node.getBoundingClientRect(), k = window.__tvScale || 1;
+    return {left: r.left / k, top: r.top / k, right: r.right / k, bottom: r.bottom / k, width: r.width / k, height: r.height / k};
+  }
   var state = {
     page: "recommend", songs: [], queue: [], favorites: [], recent: [], current: null, fixture: false,
     authenticated: false, librarySynced: false,
@@ -157,7 +163,7 @@
   function scrollFocusIntoView(root, target, keepTallPosition) {
     var rootRect, targetRect, top, bottom, padding = 8, next, max;
     if (!root || !target || root.clientHeight <= 0) return;
-    rootRect = root.getBoundingClientRect(); targetRect = target.getBoundingClientRect();
+    rootRect = rectOf(root); targetRect = rectOf(target);
     top = targetRect.top - rootRect.top; bottom = targetRect.bottom - rootRect.top; next = root.scrollTop;
     if (targetRect.height > root.clientHeight - padding * 2) { if (!keepTallPosition || bottom < padding || top > root.clientHeight - padding) next += top - padding; }
     else if (top < padding) next += top - padding;
@@ -175,7 +181,7 @@
     for (i = 0; i < roots.length; i++) { roots[i].scrollTop = positions[i]; roots[i].scrollLeft = 0; scrollFocusIntoView(roots[i], row || target, previous === target); }
   }
   function focusQueueTarget(target) { focusTarget(target); }
-  function focusRect(node) { var rect = node.getBoundingClientRect(); return {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2, width: rect.width, height: rect.height}; }
+  function focusRect(node) { var rect = rectOf(node); return {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2, width: rect.width, height: rect.height}; }
   function nearestFocus(code, active, nodes) {
     var a = focusRect(active), b, horizontal = code === 37 || code === 39, primary, cross, overlap, score, best = null, bestScore = Infinity, i;
     for (i = 0; i < nodes.length; i++) {
@@ -234,7 +240,7 @@
       else if (active === toggle) target = code === 37 ? document.getElementById("player-close") : code === 40 ? (state.commentsHidden ? document.getElementById("overlay-favorite") : commentEntry) : active;
       else if (active.id === "overlay-favorite") target = code === 40 ? document.getElementById("overlay-seek") : code === 39 ? commentEntry : code === 38 ? document.getElementById("player-close") : active;
       else if (comments.contains(active) || active === comments) {
-        if (comment && (code === 38 || code === 40)) { var commentRect = comment.getBoundingClientRect(), viewRect = comments.getBoundingClientRect(), oldTop = comments.scrollTop; if (code === 40 && commentRect.bottom > viewRect.bottom - 8) comments.scrollTop += Math.min(comments.clientHeight * .45, commentRect.bottom - viewRect.bottom + 8); else if (code === 38 && commentRect.top < viewRect.top + 8) comments.scrollTop -= Math.min(comments.clientHeight * .45, viewRect.top + 8 - commentRect.top); if (comments.scrollTop !== oldTop) return true; }
+        if (comment && (code === 38 || code === 40)) { var commentRect = rectOf(comment), viewRect = rectOf(comments), oldTop = comments.scrollTop; if (code === 40 && commentRect.bottom > viewRect.bottom - 8) comments.scrollTop += Math.min(comments.clientHeight * .45, commentRect.bottom - viewRect.bottom + 8); else if (code === 38 && commentRect.top < viewRect.top + 8) comments.scrollTop -= Math.min(comments.clientHeight * .45, viewRect.top + 8 - commentRect.top); if (comments.scrollTop !== oldTop) return true; }
         if (code === 37) target = document.getElementById(focusMemory.overlayControl);
         else if (code === 39) target = active;
         else { nodes = visibleFocusables(comments); next = nodes.indexOf(active) + (code === 40 ? 1 : -1); target = nodes[next]; if (!target) { if (code === 40) { loadMoreComments(comments); target = active; } else target = toggle; } }
@@ -854,7 +860,7 @@
     if (!active) return;
     container = active.parentNode;
     if (!container || container.clientHeight <= 0 || container.scrollHeight <= container.clientHeight) return;
-    activeRect = active.getBoundingClientRect(); containerRect = container.getBoundingClientRect();
+    activeRect = rectOf(active); containerRect = rectOf(container);
     target = container.scrollTop + activeRect.top - containerRect.top - (container.clientHeight - activeRect.height) / 2;
     max = container.scrollHeight - container.clientHeight;
     container.scrollTop = Math.max(0, Math.min(max, target));

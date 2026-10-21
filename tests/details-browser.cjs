@@ -15,8 +15,8 @@ async function detailsFlow({browser, url, screenshotsDir, android}) {
   }
   async function playButtonLayout(id) {
     return page.locator(id).evaluate(button => {
-      const heading = button.parentNode, a = button.getBoundingClientRect(), b = heading.getBoundingClientRect(), style = getComputedStyle(button);
-      return {rightGap: b.right - a.right, centerOffset: a.top + a.height / 2 - (b.top + b.height / 2), height: a.height, fontSize: style.fontSize, background: style.backgroundColor, radius: style.borderRadius};
+      const heading = button.parentNode, a = button.getBoundingClientRect(), b = heading.getBoundingClientRect(), scale = window.__tvScale || 1, style = getComputedStyle(button);
+      return {rightGap: (b.right - a.right) / scale, centerOffset: (a.top + a.height / 2 - (b.top + b.height / 2)) / scale, height: a.height / scale, fontSize: style.fontSize, background: style.backgroundColor, radius: style.borderRadius};
     });
   }
   try {
