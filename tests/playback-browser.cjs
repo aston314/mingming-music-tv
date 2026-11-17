@@ -49,7 +49,6 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
   }
   async function checkPausedRestore(page, expected) {
     await page.waitForFunction(name => document.getElementById('player-title').textContent === name, expected.track.name);
-    await page.waitForSelector('#side-lyrics .lyric-line.active');
     const actual = await page.evaluate(() => ({paused: document.getElementById('audio').paused, src: document.getElementById('audio').getAttribute('src'), calls: window.audioPlayCalls, elapsed: document.getElementById('player-elapsed').textContent, duration: document.getElementById('player-duration').textContent, mode: document.getElementById('play-mode').textContent, focus: document.activeElement.id}));
     assert.equal(actual.paused, true); assert.equal(actual.src, null); assert.equal(actual.calls, 0);
     assert.equal(actual.duration, '02:00'); assert.equal(actual.mode, '随机播放'); assert.equal(actual.focus, 'nav-recommend');
@@ -63,7 +62,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     await page.goto(url);
     await checkPausedRestore(page, snapshot);
     assert.equal(sourceRequests, 0, 'startup must not resolve or fetch audio');
-    assert.equal(await page.locator('#side-lyrics .active').textContent(), '恢复位置对应歌词');
+    assert.equal(await page.locator('#side-lyrics').count(), 0, 'home page keeps the playlist area clear of lyrics');
     // The footer and fullscreen open the same active-source popup. Custom
     // library membership is separate from the two-song playback source.
     await page.locator('[data-page="favorites"]').click();
@@ -93,6 +92,8 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     await page.locator('[data-page="queue"]').click();
     await page.locator('[data-library-tab="recent"]').click();
     const currentRow = page.locator('.track-list [data-track-id="resume-first"]');
+    await page.waitForSelector('#side-lyrics .lyric-line.active');
+    assert.equal(await page.locator('#side-lyrics .active').textContent(), '恢复位置对应歌词');
     await page.waitForSelector('.track-list .is-current .track-playing svg');
     assert.equal(await currentRow.locator('.equalizer-bar').first().evaluate(el => getComputedStyle(el).animationPlayState), 'paused');
     await page.locator('#now-playing').click();

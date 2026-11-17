@@ -373,7 +373,7 @@
 .lyric-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lyric-line.has-word-timing.active{color:#dce9dd}
 .lyric-word{color:inherit}
-.lyric-line.has-word-timing.active .lyric-word{background:linear-gradient(to right,var(--accent) 0,var(--accent) var(--word-progress,0%),#dce9dd var(--word-progress,0%),#dce9dd 100%);background-clip:text;-webkit-background-clip:text;color:transparent;transition:background-position .08s linear}
+.lyric-line.has-word-timing.active .lyric-word{color:#dce9dd}
 
 /* Both player headings share one display-only badge style. */
 .overlay-section-head{min-height:50px;align-items:center}
@@ -419,14 +419,26 @@
 
 .player-overlay:not([hidden]) #overlay-cover.is-playing{will-change:transform;-webkit-backface-visibility:hidden;backface-visibility:hidden}
 
-/* ===== Android TV: 固定 1920x1080 画布,由 tv-scale.js 等比缩放 ===== */
-html{width:100%;height:100%;overflow:hidden;background:#101713}
-body{
-  position:absolute;left:0;top:0;
-  width:1920px;height:1080px;
-  margin:0;overflow:hidden;
-  transform-origin:0 0;
-  background:radial-gradient(circle at 72% 0,#263928 0,#101713 42%);
+/* Older Android WebViews do not support inset, grid or CSS custom properties. */
+.player-overlay{top:0;right:0;bottom:0;left:0}
+.player-art-panel{padding-bottom:10px}
+.player-bar .now-playing{position:relative;display:block;height:82px;padding:14px 10px 10px 96px}
+.player-bar .now-playing img{position:absolute;left:10px;top:7px}
+.player-bar .now-playing-copy{position:absolute;top:50%;right:10px;left:96px;display:block;margin:0;transform:translateY(-50%)}
+.overlay-lyrics .lyric-line.active,#side-lyrics .lyric-line.active{color:#c7f38d}
+#overlay-lyrics.lyrics-four-line .lyric-line.active{color:#c7f38d}
+
+@supports not (display:grid){
+  .player-overlay-body{display:flex}
+  .player-art-panel{width:34%;height:100%;flex:0 0 34%}
+  .player-detail-panel{display:flex;flex:1 1 auto;margin-left:32px}
+  .player-detail-panel .overlay-section{width:50%;flex:1 1 50%;min-width:0}
+  .player-detail-panel.comments-hidden .lyric-section{width:100%;flex:1 1 auto}
 }
-.scan-modal{max-height:1040px}
-.modal{max-height:1040px}
+
+/* One 1280x720 logical canvas shared by the page, player and modal layers. */
+html{width:100%;height:100%;overflow:hidden;background:#101713}
+body{width:100%;height:100%;margin:0;overflow:hidden;background:#101713}
+#stage{position:absolute;left:0;top:0;width:1280px;height:720px;overflow:hidden;transform-origin:0 0;background:radial-gradient(circle at 72% 0,#263928 0,#101713 42%)}
+.scan-modal{max-height:calc(100% - 40px)}
+.modal{max-height:calc(100% - 40px)}

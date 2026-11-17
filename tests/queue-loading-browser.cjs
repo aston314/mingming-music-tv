@@ -74,6 +74,7 @@ module.exports = async function testQueueLoading({browser, url, screenshotsDir})
     assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'favorite', 'cover completion must preserve action focus');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'queue-open');
+    await page.locator('.nav-item[data-page="search"]').click();
     await page.waitForSelector('#side-lyrics .active');
     assert.deepEqual(await page.locator('#side-lyrics').evaluate(el => ({tab: el.tabIndex, focusable: el.classList.contains('focusable')})), {tab: -1, focusable: false});
     await page.locator('#side-lyrics').evaluate(el => {el.focus();});
@@ -87,7 +88,7 @@ module.exports = async function testQueueLoading({browser, url, screenshotsDir})
       await page.setViewportSize(size);
       coverGate = gate();
       await page.reload();
-      await page.waitForSelector('#side-lyrics .active');
+      await page.waitForSelector('#overlay-lyrics .active', {state: 'attached'});
       await page.locator('#now-playing').click();
       assert.equal(await page.locator('.overlay-song-meta').count(), 0);
       await page.locator('#overlay-queue').click();
@@ -109,7 +110,7 @@ module.exports = async function testQueueLoading({browser, url, screenshotsDir})
     }
 
     coverFailure = true; coverGate = gate();
-    await page.reload(); await page.waitForSelector('#side-lyrics .active');
+    await page.reload(); await page.waitForSelector('#overlay-lyrics .active', {state: 'attached'});
     await page.locator('#queue-open').click(); await page.waitForSelector('#queue-loading');
     coverGate.release(); await idle();
     assert.equal(await page.locator('.queue-popup .track-row').count(), 2, 'cover failure must keep usable rows');

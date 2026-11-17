@@ -53,7 +53,7 @@ module.exports = async function testCommentsVisibility({browser, url, screenshot
       await page.screenshot({path: file}); console.log('Comments visibility screenshot: ' + file);
     }
     try {
-      await page.goto(url); await page.waitForSelector('#side-lyrics .active');
+      await page.goto(url); await page.waitForSelector('#overlay-lyrics .active', {state: 'attached'});
       await page.locator('#now-playing').click();
       await page.waitForSelector('#overlay-comments .comment');
       await page.waitForFunction(() => document.getElementById('overlay-comments').scrollTop > 2);

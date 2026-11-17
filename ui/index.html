@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+  <div id="stage">
   <div id="app" class="app-shell">
     <header class="topbar">
       <div class="brand"><span class="brand-mark">♪</span><span class="brand-name">明明音乐<span id="connection-dot" class="status-dot" aria-label="服务连接状态"></span></span></div>
@@ -73,22 +74,7 @@
   <section id="queue-popup" class="queue-popup" hidden aria-label="播放列表"></section>
   <div id="modal-root" class="modal-root" hidden></div>
   <audio id="audio" preload="metadata"></audio>
-  <script>
-  /* 固定 1920x1080 画布,按屏幕实际尺寸等比缩放;必须早于 app.js 执行 */
-  (function () {
-    var W = 1920, H = 1080;
-    function fit() {
-      var vw = window.innerWidth, vh = window.innerHeight;
-      var s = Math.min(vw / W, vh / H);
-      var x = (vw - W * s) / 2, y = (vh - H * s) / 2;
-      document.body.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
-      window.__tvScale = s;
-    }
-    fit();
-    window.addEventListener('resize', fit);
-    window.addEventListener('orientationchange', fit);
-  })();
-  </script>
+  </div>
   <script src="/app.js"></script>
 </body>
 </html>

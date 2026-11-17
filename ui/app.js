@@ -1,7 +1,50 @@
 (function () {
   "use strict";
-  // TV 固定画布被整体缩放后,getBoundingClientRect 返回的是缩放后的像素,
-  // 而 clientHeight/scrollTop 仍是画布像素。统一换算回画布像素再比较。
+  // Keep one logical TV canvas for rendering, focus and scroll geometry. The
+  // root client size is the visible WebView size; innerWidth may include the
+  // overflowing logical canvas on Android WebView.
+  var canvasWidth = 1280, canvasHeight = 720, viewportTimer = 0;
+  function fitViewport() {
+    var root = document.documentElement, stage = document.getElementById("stage"), width = root.clientWidth || window.innerWidth, height = root.clientHeight || window.innerHeight, scale;
+    if (!stage || !(width > 0 && height > 0)) return false;
+    scale = Math.min(width / canvasWidth, height / canvasHeight);
+    if (!(scale > 0)) return false;
+    stage.style.width = (width / scale) + "px";
+    stage.style.height = (height / scale) + "px";
+    stage.style.transform = "scale(" + scale + ")";
+    stage.style.left = "0px";
+    stage.style.top = "0px";
+    window.__tvScale = scale;
+    window.__tvViewport = {width: width, height: height, scale: scale, stageWidth: width / scale, stageHeight: height / scale};
+    return true;
+  }
+  function refreshViewport() {
+    var active, node, style;
+    if (!fitViewport()) return;
+    window.clearTimeout(viewportTimer);
+    viewportTimer = window.setTimeout(function () {
+      active = document.activeElement;
+      if (active && isFocusable(active)) {
+        node = active.parentNode;
+        while (node && node !== document.body) {
+          style = window.getComputedStyle(node);
+          if (/(auto|scroll)/.test(style.overflowY) && node.clientHeight > 0) scrollFocusIntoView(node, active, false);
+          node = node.parentNode;
+        }
+      }
+      if (typeof centerLyrics === "function") centerLyrics();
+      updateLyrics(playbackPosition(), true);
+    }, 100);
+  }
+  window.refreshViewport = refreshViewport;
+  fitViewport();
+  window.addEventListener("resize", refreshViewport);
+  window.addEventListener("orientationchange", refreshViewport);
+  window.addEventListener("pageshow", refreshViewport);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) refreshViewport(); });
+
+  // TV fixed canvas is transformed, so getBoundingClientRect returns viewport
+  // pixels while clientHeight/scrollTop remain logical canvas pixels.
   function rectOf(node) {
     var r = node.getBoundingClientRect(), k = window.__tvScale || 1;
     return {left: r.left / k, top: r.top / k, right: r.right / k, bottom: r.bottom / k, width: r.width / k, height: r.height / k};
@@ -28,6 +71,7 @@
   var overlayLyricView = {lines: null, message: null, four: false, width: 0, height: 0, index: -1, time: null, measure: null};
   var requestFrame = window.requestAnimationFrame ? function (fn) { return window.requestAnimationFrame(fn); } : function (fn) { return window.setTimeout(function () { fn(Date.now()); }, 32); };
   var cancelFrame = window.cancelAnimationFrame ? function (id) { window.cancelAnimationFrame(id); } : function (id) { window.clearTimeout(id); };
+  var lyricWordClipSupported = typeof document.createElement("span").style.webkitBackgroundClip !== "undefined";
 
   function each(root, selector, fn) { var nodes = root.querySelectorAll(selector), i; for (i = 0; i < nodes.length; i++) fn(nodes[i]); }
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>\"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
@@ -599,7 +643,7 @@
     if (loggedIn) document.getElementById("account-logout").addEventListener("click", logout);
     else { document.getElementById("account-scan-login").onclick = function () { openScan("login"); }; document.getElementById("account-scan-register").onclick = function () { openScan("register"); }; document.getElementById("account-login").addEventListener("click", function () { openLogin("login"); }); document.getElementById("account-register").addEventListener("click", function () { openLogin("register"); }); document.getElementById("account-reset").addEventListener("click", function () { openLogin("reset"); }); }
    restoreBookmark(content, savedFocus); }
-  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
+  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); renderSidePanel(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
   function toggleQueue(song) {
     if (!song) return;
     if (isQueued(song)) removeQueuedSong(song);
@@ -770,7 +814,8 @@
   }
   function renderSidePanel() {
     var savedFocus = bookmark(side), song = state.current, lyricsBox = document.getElementById("side-lyrics"), lyricScroll = lyricsBox ? lyricsBox.scrollTop : 0;
-    if (!song) { side.innerHTML = ""; return; }
+    // The home playlist page prioritizes poster density; fullscreen playback still owns lyrics.
+    if (!song || state.page === "recommend") { side.innerHTML = ""; return; }
     side.innerHTML = '<div id="side-lyrics" class="lyrics" tabindex="-1" aria-label="同步歌词">' + lyricMarkup() + '</div>';
     lyricsBox = document.getElementById("side-lyrics");
     if (lyricsBox) lyricsBox.scrollTop = lyricScroll; restoreBookmark(side, savedFocus);
@@ -866,7 +911,7 @@
     container.scrollTop = Math.max(0, Math.min(max, target));
   }
   function updateLyrics(time, force) {
-    var next = -1, i, nodes, active, changed, line, wordNodes, j, word, progress;
+    var next = -1, i, nodes, active, changed, line, wordNodes, j, word, progress, isActive, wordStyle;
     for (i = 0; i < state.lyricLines.length; i++) { if (state.lyricLines[i].time >= 0 && state.lyricLines[i].time <= time) next = i; }
     // Keep the first lyric visibly selected before the first timed line begins
     // or while a WebView has not produced its first timeupdate event yet.
@@ -874,12 +919,19 @@
     changed = !!force || next !== state.lyricIndex; state.lyricIndex = next;
     nodes = document.querySelectorAll("#overlay-lyrics .lyric-line, #side-lyrics .lyric-line");
     for (i = 0; i < nodes.length; i++) {
-      nodes[i].classList.toggle("active", parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next);
+      isActive = parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next;
+      nodes[i].classList.toggle("active", isActive);
       line = state.lyricLines[parseInt(nodes[i].getAttribute("data-lyric-index"), 10)];
       wordNodes = nodes[i].querySelectorAll(".lyric-word");
       for (j = 0; j < wordNodes.length; j++) {
         word = line && line.words && line.words[j]; progress = !word || time <= word.time ? 0 : time >= word.end ? 100 : Math.max(0, Math.min(100, (time - word.time) / Math.max(.001, word.end - word.time) * 100));
-        wordNodes[j].style.setProperty("--word-progress", progress + "%");
+        wordStyle = wordNodes[j].style;
+        if (isActive) {
+          if (lyricWordClipSupported) {
+            wordStyle.backgroundImage = "-webkit-linear-gradient(left,#c7f38d 0,#c7f38d " + progress + "%,#dce9dd " + progress + "%,#dce9dd 100%)";
+            wordStyle.webkitBackgroundClip = "text"; wordStyle.backgroundClip = "text"; wordStyle.color = wordStyle.backgroundImage ? "transparent" : (progress > 0 ? "#c7f38d" : "#dce9dd");
+          } else wordStyle.color = progress > 0 ? "#c7f38d" : "#dce9dd";
+        } else if (wordStyle.color) { wordStyle.backgroundImage = ""; wordStyle.webkitBackgroundClip = ""; wordStyle.backgroundClip = ""; wordStyle.color = ""; }
       }
     }
     updateFourLineLyrics(next, time, force);
@@ -977,7 +1029,7 @@
     playback.resolving = false; playback.needsSource = false; playback.sourceReady = false; playback.errorKind = ""; playback.errorCode = 0;
     setPlaybackStatus(playback.wantPlay ? "preparing" : "paused"); audio.src = "/media?url=" + encodeURIComponent(source); audio.load();
   }
-  function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), close; if (!state.current || !overlay) return; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); close = document.getElementById("player-close"); if (close) close.focus(); }
+  function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), close; if (!overlay || state.playerOpen) return; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); close = document.getElementById("player-close"); if (close) close.focus(); }
   function queuePopupMarkup(items) {
     var html = "", i, song, actions, favorite;
     for (i = 0; i < items.length; i++) {
@@ -1223,7 +1275,7 @@
   window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); syncCommentMotion(); };
   document.addEventListener("visibilitychange", function () { if (document.hidden) window.MingmingTVBackground(); else window.MingmingTVForeground(); });
   window.addEventListener("pageshow", window.MingmingTVForeground);
-  window.addEventListener("resize", function () { syncCommentMotion(); updateLyrics(playbackPosition(), true); });
+  window.addEventListener("resize", function () { refreshViewport(); syncCommentMotion(); updateLyrics(playbackPosition(), true); });
   window.addEventListener("pagehide", function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) { closeScan(); var xhr = new XMLHttpRequest(); xhr.open("POST", "/api/scan/cancel", false); try { xhr.send(); } catch (ignore) {} } });
 
   function logout() {
@@ -1241,7 +1293,15 @@
 
   each(document, ".nav-item", function (b) { b.addEventListener("click", function () { renderPage(b.getAttribute("data-page")); }); });
   document.getElementById("queue-open").addEventListener("click", openQueuePopup);
-  document.getElementById("now-playing").addEventListener("click", openPlayerOverlay);
+  (function bindNowPlaying() {
+    var button = document.getElementById("now-playing"), touch = null, lastTouch = 0;
+    button.type = "button"; button.setAttribute("aria-label", "打开全屏播放器");
+    button.addEventListener("touchstart", function (event) { var point = event.touches && event.touches[0]; touch = point ? {x: point.clientX, y: point.clientY} : null; });
+    button.addEventListener("touchmove", function (event) { var point = event.touches && event.touches[0]; if (touch && point && (Math.abs(point.clientX - touch.x) > 12 || Math.abs(point.clientY - touch.y) > 12)) touch = null; });
+    button.addEventListener("touchend", function (event) { if (!touch) return; event.preventDefault(); touch = null; lastTouch = Date.now(); openPlayerOverlay(); });
+    button.addEventListener("touchcancel", function () { touch = null; });
+    button.addEventListener("click", function (event) { if (event.detail > 0 && Date.now() - lastTouch < 800) { event.preventDefault(); return; } openPlayerOverlay(); });
+  }());
   document.getElementById("player-close").addEventListener("click", closePlayerOverlay);
   document.getElementById("player-comments-toggle").addEventListener("click", toggleCommentsVisibility);
   document.getElementById("player-repeat").addEventListener("click", cyclePlayMode);

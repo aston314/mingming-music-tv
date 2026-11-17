@@ -89,14 +89,6 @@ public final class MainActivity extends Activity {
         final int generation = startupGeneration;
         web.setBackgroundColor(Color.rgb(16, 23, 19)); web.setFocusable(true); web.setFocusableInTouchMode(true);
         web.getSettings().setJavaScriptEnabled(true); web.getSettings().setDomStorageEnabled(true);
-        boolean isShield = "NVIDIA".equalsIgnoreCase(android.os.Build.MANUFACTURER)
-        || android.os.Build.MODEL.toUpperCase().contains("SHIELD");
-        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-        if (isShield && dm.widthPixels / dm.density <= 1000) {
-            web.getSettings().setUseWideViewPort(true);
-            web.getSettings().setLoadWithOverviewMode(true);
-            web.setInitialScale(150);
-        }
         web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(false);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
         web.addJavascriptInterface(new MusicBridge(), "MingmingNativePlayer");

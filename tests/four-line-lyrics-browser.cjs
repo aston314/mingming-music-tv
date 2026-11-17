@@ -5,7 +5,7 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
   const texts = ['第一句歌词', '风吹过远方', '记忆慢慢浮现', '只盼望有一双温柔手', '能抚慰我内心的寂寞', '这是用来验证长句完整显示的歌词'.repeat(4), '在音乐里等你', '世界如此安静', '下一段旋律响起', '星光照亮夜空', '最后的回声', '最后一句歌词'];
   const lyric = texts.map((text, index) => `[${index * 10000},10000]` + [...text].map((char, word) => `(${index * 10000 + Math.floor(word * 10000 / text.length)},${Math.floor(10000 / text.length)},0)${char}`).join('')).join('\n');
   for (const size of [{width: 1920, height: 1080}, {width: 960, height: 540}]) {
-    const context = await browser.newContext({viewport: size});
+    const context = await browser.newContext({viewport: size, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 6.0; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.2403.133 Safari/537.36'});
     const song = {id: 'four-line-test', name: '四行歌词测试', artist: '测试歌手', al: {name: '测试专辑'}, dt: 120000, picUrl: 'https://p3.music.126.net/test-cover.jpg?param=800y800&keep=1#cover'};
     await context.addInitScript(track => {
       window.mockPlayback = {snapshot: {schema: 1, track, position: 34.5, duration: 120, mode: 'list', list: [track], listSource: 'recommend'}, state: 'paused', wantPlay: false, ready: true};
@@ -34,7 +34,8 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
           slot: (rect.top + rect.height / 2 - box.top) / box.height, font: parseFloat(style.fontSize), nextFont: parseFloat(getComputedStyle(root.querySelector('.four-next') || active).fontSize),
           clipped: active.scrollWidth > active.clientWidth, nowrap: style.whiteSpace, transition: getComputedStyle(root.firstChild).transitionDuration,
           transform: getComputedStyle(root.firstChild).transform, gradient: getComputedStyle(active.querySelector('.lyric-word')).backgroundImage,
-          wordProgress: [...active.querySelectorAll('.lyric-word')].map(node => parseFloat(node.style.getPropertyValue('--word-progress'))),
+          inlineGradient: active.querySelector('.lyric-word').style.backgroundImage, wordClip: getComputedStyle(active.querySelector('.lyric-word')).webkitBackgroundClip,
+          wordProgress: [...active.querySelectorAll('.lyric-word')].map(node => {const match = /rgb\(220, 233, 221\) ([\d.]+)%/.exec(node.style.backgroundImage); return match ? parseFloat(match[1]) : NaN;}),
           focus: document.activeElement.id, focusable: root.classList.contains('focusable')};
       });
     }
@@ -45,7 +46,13 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
     try {
       await page.goto(url);
       await page.waitForFunction(() => document.getElementById('player-title').textContent === '四行歌词测试');
-      await page.locator('#now-playing').click();
+      await page.locator('.nav-item[data-page="search"]').click();
+      await page.locator('#now-playing').tap();
+      assert.equal(await page.locator('#now-playing').getAttribute('type'), 'button', 'footer entry has explicit button semantics');
+      assert.equal(await page.locator('#now-playing').getAttribute('aria-label'), '打开全屏播放器');
+      assert.equal(await page.locator('#player-overlay').isVisible(), true, 'Android-style touch opens the fullscreen player');
+      const overlayBounds = await page.locator('#player-overlay').evaluate(node => {const rect = node.getBoundingClientRect(); return {left: rect.left, top: rect.top, width: rect.width, height: rect.height};});
+      assert.deepEqual(overlayBounds, {left: 0, top: 0, width: size.width, height: size.height}, 'fullscreen overlay covers the visible Android viewport');
       assert.equal(await page.locator('#overlay-lyrics .lyric-loading').count(), 1);
       assert.equal(await page.locator('#lyric-status').isVisible(), false, 'fullscreen has one lyric loading message');
       assert.equal((await page.locator('#player-overlay').innerText()).match(/正在加载歌词/g).length, 1);
@@ -72,6 +79,9 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
       assert.ok(view.font > view.nextFont * 1.3 && view.font > parseFloat(normalFont) * 2, 'current sentence uses a large TV font');
       assert.equal(view.clipped, false); assert.equal(view.nowrap, 'nowrap'); assert.equal(view.focusable, false);
       assert.equal(view.focus, 'player-comments-toggle'); assert.match(view.gradient, /199, 243, 141/, 'karaoke uses our accent green');
+      assert.match(view.inlineGradient, /rgb\(199, 243, 141\)/, 'legacy WebView receives a concrete prefixed word gradient');
+      assert.equal(view.inlineGradient.indexOf('var('), -1, 'karaoke does not depend on unsupported CSS custom properties');
+      assert.equal(view.wordClip, 'text');
       assert.ok(view.wordProgress.some(p => p > 0 && p < 100), 'word timing retains partial progress');
       assert.equal(await page.locator('#side-lyrics .active').evaluate(node => getComputedStyle(node).fontSize), sideFont, 'side lyrics retain their style');
       await page.waitForTimeout(600);
