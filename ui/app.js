@@ -4,6 +4,25 @@
   // root client size is the visible WebView size; innerWidth may include the
   // overflowing logical canvas on Android WebView.
   var canvasWidth = 1280, canvasHeight = 720, viewportTimer = 0;
+  function supportsFlexGap() {
+    var box = document.createElement("div"), first = document.createElement("div"), second = document.createElement("div"), gap;
+    box.style.cssText = "position:absolute;left:-1000px;top:-1000px;display:flex;flex-direction:column;gap:1px;padding:0;border:0";
+    first.style.cssText = second.style.cssText = "width:1px;height:1px;flex:none";
+    box.appendChild(first); box.appendChild(second); document.body.appendChild(box);
+    gap = second.getBoundingClientRect().top - first.getBoundingClientRect().bottom;
+    document.body.removeChild(box);
+    return gap >= 0.5;
+  }
+  function supportsGrid() {
+    var box = document.createElement("div"), first = document.createElement("div"), second = document.createElement("div"), columns;
+    box.style.cssText = "position:absolute;left:-1000px;top:-1000px;display:grid;grid-template-columns:1px 1px;width:2px;padding:0;border:0";
+    first.style.cssText = second.style.cssText = "width:1px;height:1px";
+    box.appendChild(first); box.appendChild(second); document.body.appendChild(box);
+    columns = second.getBoundingClientRect().left - first.getBoundingClientRect().left;
+    document.body.removeChild(box);
+    return columns >= 0.5;
+  }
+  if (!supportsFlexGap() || !supportsGrid()) document.documentElement.className += " legacy-layout";
   function fitViewport() {
     var root = document.documentElement, stage = document.getElementById("stage"), width = root.clientWidth || window.innerWidth, height = root.clientHeight || window.innerHeight, scale;
     if (!stage || !(width > 0 && height > 0)) return false;
@@ -62,7 +81,7 @@
     playerOpen: false, playerPreviousFocus: null, queueOpen: false, queuePreviousFocus: null, modalPreviousFocus: null, exitDialog: false, playMode: "list", playToken: 0,
     searchQuery: "", searchPage: 0, searchPageSize: 30, searchMore: false, searchLoading: false, searchRequest: 0, searchHistory: [], seekInput: null, detailReturn: null, detailKind: "", artistDetail: null, artistAlbums: [], artistAlbumsMore: false, artistAlbumsLoading: false, artistAlbumsError: "", artistAlbumsOffset: 0, artistAlbumsRequest: 0, albumDetail: null, shareMenu: null, returnPlaylist: null, scan: null, scanGeneration: 0
   };
-  var content = document.getElementById("content"), side = document.getElementById("side-panel"), audio = document.getElementById("audio");
+  var content = document.getElementById("content"), audio = document.getElementById("audio");
   var nativePlayer = window.MingmingNativePlayer && window.MingmingNativePlayer.command && window.MingmingNativePlayer.read ? window.MingmingNativePlayer : null;
   var nativeApp = !!(window.MingmingTVApp || nativePlayer);
   var nativeSelection = 0, nativePendingSelection = 0;
@@ -84,16 +103,17 @@
     xhr.ontimeout = function () { finish(new Error("请求超时")); }; xhr.onerror = function () { finish(new Error("网络不可用")); }; xhr.send(body || null);
   }
   function isUrl(value) { return typeof value === "string" && /^(https?:\/\/|\/)/.test(value); }
-  function cover(song) { var value; if (!song) return "https://picsum.photos/seed/mingming-default/300/300"; value = song.picUrl || (song.al && song.al.picUrl) || song.coverPath || song.image || song.pic || song.pic_id; if (!isUrl(value)) return "https://picsum.photos/seed/mingming-default/300/300"; return value.charAt(0) === "/" ? "/media?url=" + encodeURIComponent(value) : value; }
-  function fullscreenCover(song) {
-    var value = cover(song), hash, parts, query, i, params = [];
+  function cover(song, size) { var value; if (!song) return "https://picsum.photos/seed/mingming-default/300/300"; value = song.picUrl || (song.al && song.al.picUrl) || song.coverPath || song.image || song.pic || song.pic_id; if (!isUrl(value)) return "https://picsum.photos/seed/mingming-default/300/300"; return value.charAt(0) === "/" ? "/media?url=" + encodeURIComponent(value) : sizedArtwork(value, size || 160); }
+  function sizedArtwork(value, size) {
+    var hash, parts, query, i, params = [];
     if (!/^https?:\/\/p\d+\.music\.126\.net\//i.test(value)) return value;
     hash = value.indexOf("#"); hash = hash < 0 ? "" : value.slice(hash); if (hash) value = value.slice(0, -hash.length);
     parts = value.split("?"); query = parts[1] ? parts[1].split("&") : [];
     for (i = 0; i < query.length; i++) if (query[i] && !/^param=/i.test(query[i])) params.push(query[i]);
-    params.push("param=400y400");
+    params.push("param=" + size + "y" + size);
     return parts[0] + "?" + params.join("&") + hash;
   }
+  function fullscreenCover(song) { return cover(song, 400); }
   function songName(song) { return song && (song.name || song.title || song.mainTitle || "未命名歌曲"); }
   function artist(song) { var names = song && (song.ar || song.artists); if (names && names.length) return names.map(function (x) { return typeof x === "string" ? x : x.name; }).join(" / "); return song && (song.artist || "未知歌手"); }
   function album(song) { var value = song && (song.al || song.album); return (value && typeof value === "object" ? value.name : value) || "单曲"; }
@@ -101,6 +121,7 @@
   function renderState(message, error) { content.innerHTML = '<div class="state' + (error ? ' error' : '') + '">' + esc(message) + '</div>'; }
 
   var focusMemory = {content: {}, footerReturn: null, overlayControl: "overlay-queue"};
+  var progressView = {percent: null, elapsed: null, duration: null};
   var libraryWrite = {inFlight: false, pending: false, revision: 0, callbacks: []};
   var queueLoading = {data: 0, covers: 0, token: 0};
   var playback = {position: 0, duration: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false, errorKind: "", errorCode: 0};
@@ -129,7 +150,7 @@
   }
   function nativeSnapshot() { return {schema: 1, track: snapshotTrack(state.current), position: playback.position, duration: playback.duration, mode: state.playMode, list: playbackItems().slice(0, 500).map(snapshotTrack), listSource: state.playbackListSource, selectionTag: nativePendingSelection}; }
   function refreshNativePlayback() {
-    var data, saved, changed;
+    var data, saved, changed, oldDuration = playback.duration;
     if (!nativePlayer) return false;
     try { data = JSON.parse(nativePlayer.read()); } catch (ignore) { return false; }
     saved = data && data.snapshot;
@@ -142,7 +163,8 @@
     playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
     playback.resolving = data.state === "preparing";
     playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
-    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); updateTrackStates();
+    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); renderQueueButton();
+    if (oldDuration !== playback.duration) updateTrackStates();
     return true;
   }
   function flushPlaybackWrite() {
@@ -173,12 +195,23 @@
   function focusRoot() { var modal = document.getElementById("modal-root"); return !modal.hidden ? modal : state.queueOpen ? document.getElementById("queue-popup") : state.playerOpen ? document.getElementById("player-overlay") : document; }
   function isFocusable(node) { return !!node && document.body.contains(node) && !node.disabled && node.getClientRects().length > 0 && window.getComputedStyle(node).visibility !== "hidden"; }
   function visibleFocusables(root) { var all = (root || document).querySelectorAll(".focusable"), visible = [], i; for (i = 0; i < all.length; i++) if (isFocusable(all[i])) visible.push(all[i]); return visible; }
+  function firstFocusable(root) { var all = root.querySelectorAll(".focusable"), i; for (i = 0; i < all.length; i++) if (isFocusable(all[i])) return all[i]; return null; }
+  function focusableNearIndex(root, index) {
+    var all = root.querySelectorAll(".focusable"), start = Math.max(0, Math.min(index || 0, all.length - 1)), distance;
+    for (distance = 0; distance < all.length; distance++) {
+      if (isFocusable(all[start + distance])) return all[start + distance];
+      if (distance && isFocusable(all[start - distance])) return all[start - distance];
+    }
+    return null;
+  }
   function parentMatch(node, selector, boundary) { while (node && node !== boundary && node !== document) { if (node.matches ? node.matches(selector) : node.webkitMatchesSelector && node.webkitMatchesSelector(selector)) return node; node = node.parentNode; } return null; }
   function activeNav() { return document.querySelector('.nav-item[data-page="' + state.page + '"]') || document.getElementById("nav-recommend"); }
   function bookmark(root) {
     var active = document.activeElement, row, attributes = ["data-playlist-id", "data-search-history", "data-provider", "data-library-tab", "data-category-index", "data-subcat", "data-current-action", "data-mode", "data-comment-index", "data-album-id"], key = {}, i;
     if (!active || !active.classList.contains("focusable") || !root.contains(active)) return null;
-    key.node = active; key.top = root.scrollTop; key.owner = focusRoot(); key.index = visibleFocusables(root).indexOf(active);
+    // Remember the DOM position without measuring every row and hidden action.
+    // Only a detached return target needs the nearby-visible fallback.
+    key.node = active; key.top = root.scrollTop; key.owner = focusRoot(); key.index = Array.prototype.indexOf.call(root.querySelectorAll(".focusable"), active);
     row = parentMatch(active, ".track-row", root);
     if (row && row.id === "recent-current-track") { key.id = row.id; key.action = active.getAttribute("data-action"); }
     else if (row) { key.song = row.getAttribute("data-track-id"); key.action = active.getAttribute("data-action"); key.rowIndex = parseInt(row.getAttribute("data-song"), 10); }
@@ -189,7 +222,7 @@
   function resolveBookmark(root, key) {
     var nodes, i, row, actions;
     if (!key) return null;
-    if (isFocusable(key.node)) return key.node;
+    if (root.contains(key.node) && isFocusable(key.node)) return key.node;
     if (key.song != null) { nodes = root.querySelectorAll(".track-row[data-song][data-track-id]"); for (i = 0; i < nodes.length; i++) if (nodes[i].getAttribute("data-track-id") === key.song) { row = nodes[i]; break; } if (!row && nodes.length) row = nodes[Math.min(key.rowIndex || 0, nodes.length - 1)]; if (row && key.action) { actions = row.querySelectorAll("[data-action]"); for (i = 0; i < actions.length; i++) if (actions[i].getAttribute("data-action") === key.action) return actions[i]; } return row || null; }
     if (key.id) { row = document.getElementById(key.id); if (row && root.contains(row) && isFocusable(row)) return key.action ? row.querySelector('[data-action="' + key.action + '"]') || row : row; }
     if (key.attribute) { nodes = root.querySelectorAll("[" + key.attribute + "]"); for (i = 0; i < nodes.length; i++) if (nodes[i].getAttribute(key.attribute) === key.value && isFocusable(nodes[i])) return nodes[i]; }
@@ -198,12 +231,12 @@
   function restoreBookmark(root, key) {
     var target;
     if (!key || key.owner !== focusRoot() || isFocusable(key.node) || (document.activeElement !== document.body && document.activeElement !== document.documentElement)) return;
-    target = resolveBookmark(root, key) || visibleFocusables(root)[Math.max(0, Math.min(key.index, visibleFocusables(root).length - 1))];
+    target = resolveBookmark(root, key) || focusableNearIndex(root, key.index);
     root.scrollTop = key.top || 0;
     focusTarget(target || (root === content ? activeNav() : document.getElementById("player-close")));
   }
-  function contentEntry() { var key = focusMemory.content[state.page], target = resolveBookmark(content, key); return target || visibleFocusables(content)[0] || activeNav(); }
-  function focusInitial() { var root = focusRoot(), target; if (root === document) target = activeNav(); else if (state.queueOpen && root.id === "queue-popup") target = root.querySelector(".track-row") || document.getElementById("queue-popup-close"); else target = visibleFocusables(root)[0]; focusTarget(target); }
+  function contentEntry() { var key = focusMemory.content[state.page], target = resolveBookmark(content, key); return target || firstFocusable(content) || activeNav(); }
+  function focusInitial() { var root = focusRoot(), target; if (root === document) target = activeNav(); else if (state.queueOpen && root.id === "queue-popup") target = root.querySelector(".track-row") || document.getElementById("queue-popup-close"); else target = firstFocusable(root); focusTarget(target); }
   function scrollFocusIntoView(root, target, keepTallPosition) {
     var rootRect, targetRect, top, bottom, padding = 8, next, max;
     if (!root || !target || root.clientHeight <= 0) return;
@@ -212,17 +245,24 @@
     if (targetRect.height > root.clientHeight - padding * 2) { if (!keepTallPosition || bottom < padding || top > root.clientHeight - padding) next += top - padding; }
     else if (top < padding) next += top - padding;
     else if (bottom > root.clientHeight - padding) next += bottom - (root.clientHeight - padding);
-    max = Math.max(0, root.scrollHeight - root.clientHeight); root.scrollTop = Math.max(0, Math.min(max, next));
+    max = Math.max(0, root.scrollHeight - root.clientHeight); next = Math.max(0, Math.min(max, next));
+    if (root.scrollTop !== next) root.scrollTop = next;
   }
   function focusTarget(target) {
     var previous = document.activeElement, node, row, roots = [], positions = [], i, style;
     if (!target || !document.body.contains(target)) return;
+    if (target.classList.contains("nav-item")) {
+      // Sidebar moves do not need content/player geometry or ancestor styles.
+      target.focus(); node = target.parentNode;
+      if (node.scrollHeight > node.clientHeight) scrollFocusIntoView(node, target, previous === target);
+      return;
+    }
     row = parentMatch(target, ".track-row", document);
     node = target.parentNode;
     while (node && node !== document.body) { style = window.getComputedStyle(node); if (/(auto|scroll)/.test(style.overflowY) && node.clientHeight > 0) { roots.push(node); positions.push(node.scrollTop); } node = node.parentNode; }
     if (row && row !== target && window.getComputedStyle(target).visibility === "hidden") row.focus();
     try { target.focus({preventScroll: true}); } catch (ignore) { target.focus(); }
-    for (i = 0; i < roots.length; i++) { roots[i].scrollTop = positions[i]; roots[i].scrollLeft = 0; scrollFocusIntoView(roots[i], row || target, previous === target); }
+    for (i = 0; i < roots.length; i++) { if (roots[i].scrollTop !== positions[i]) roots[i].scrollTop = positions[i]; if (roots[i].scrollLeft) roots[i].scrollLeft = 0; scrollFocusIntoView(roots[i], row || target, previous === target); }
   }
   function focusQueueTarget(target) { focusTarget(target); }
   function focusRect(node) { var rect = rectOf(node); return {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2, width: rect.width, height: rect.height}; }
@@ -255,7 +295,7 @@
     if (rows[next]) return rows[next];
     if (state.queueOpen) return code === 38 ? document.getElementById("queue-popup-close") : active;
     if (code === 40) { focusMemory.footerReturn = bookmark(content); return document.getElementById("seek"); }
-    return nearestFocus(code, row, visibleFocusables(content).filter(function (node) { return !parentMatch(node, ".track-row", content); })) || row;
+    return nearestFocus(code, row, Array.prototype.filter.call(content.querySelectorAll(".focusable:not(.track-row):not(.track-action)"), isFocusable)) || row;
   }
   function albumCardFocus(code, active) {
     var card = parentMatch(active, ".album-card", content), cards, next;
@@ -267,7 +307,7 @@
   }
   function playerFocusKey(code, active) {
     if (code !== 37 && code !== 38 && code !== 39 && code !== 40 && active.id !== "seek" && active.id !== "overlay-seek") return false;
-    var ids = state.playerOpen ? ["player-repeat", "overlay-prev", "overlay-play", "overlay-next", "overlay-queue"] : ["now-playing", "play-mode", "prev", "play", "next", "queue-open"], index = ids.indexOf(active.id), target, comments = document.getElementById("overlay-comments"), toggle = document.getElementById("player-comments-toggle"), comment = parentMatch(active, ".comment", comments), commentEntry = state.commentsHidden ? toggle : visibleFocusables(comments)[0] || comments, nodes, next;
+    var ids = state.playerOpen ? ["player-repeat", "overlay-prev", "overlay-play", "overlay-next", "overlay-queue"] : ["now-playing", "play-mode", "prev", "play", "next", "queue-open"], index = ids.indexOf(active.id), target, comments = document.getElementById("overlay-comments"), toggle = document.getElementById("player-comments-toggle"), comment = state.playerOpen ? parentMatch(active, ".comment", comments) : null, commentEntry = state.playerOpen ? (state.commentsHidden ? toggle : firstFocusable(comments) || comments) : null, nodes, next;
     if (active.id === "seek" || active.id === "overlay-seek") {
       if (code === 37 || code === 39) { seekTo(playbackPosition() + (code === 39 ? 5 : -5)); return true; }
       if (code === 13 || code === 23 || code === 66) return true;
@@ -306,6 +346,12 @@
     if (code === 4 || code === 27) { handleBack(); return; }
     if (!isFocusable(active) || !active.classList.contains("focusable") || (root !== document && !root.contains(active))) { focusInitial(); active = document.activeElement; }
     if (!active || !active.classList.contains("focusable")) return;
+    if (root === document && active.classList.contains("nav-item") && (code === 38 || code === 40)) {
+      navs = visibleFocusables(document.querySelector(".sidebar")); index = navs.indexOf(active);
+      target = code === 38 ? navs[Math.max(0, index - 1)] : navs[index + 1] || document.getElementById("now-playing");
+      if (code === 40 && index === navs.length - 1) focusMemory.footerReturn = null;
+      focusTarget(target); return;
+    }
     if (root.id !== "modal-root" && !state.queueOpen && playerFocusKey(code, active)) return;
     if (code === 23 || code === 66 || code === 13) { if (active.click) active.click(); return; }
     if (code !== 37 && code !== 38 && code !== 39 && code !== 40) return;
@@ -318,7 +364,7 @@
       else if (code === 40) { target = navs[index + 1] || document.getElementById("now-playing"); if (index === navs.length - 1) focusMemory.footerReturn = null; }
       else target = active;
     } else if (content.contains(active)) {
-      target = albumCardFocus(code, active) || trackCardFocus(code, active) || nearestFocus(code, active, visibleFocusables(content).filter(function (node) { return !node.classList.contains("track-action"); }));
+      target = albumCardFocus(code, active) || trackCardFocus(code, active) || nearestFocus(code, active, Array.prototype.filter.call(content.querySelectorAll(".focusable:not(.track-action)"), isFocusable));
       if (!target && code === 37) target = activeNav();
       if (!target && code === 39) target = active;
       if (!target && code === 40) { focusMemory.footerReturn = bookmark(content); target = document.getElementById("seek"); }
@@ -361,8 +407,8 @@
     var current = sameSong(state.current, song);
     return '<div class="track-row focusable' + (queueView ? ' queue-popup-item' : '') + (current ? ' is-current' : '') + '" role="button" tabindex="0" data-song="' + index + '" data-track-id="' + esc(song.id) + '" aria-label="播放 ' + esc(songName(song)) + '">' + (queueView ? '<span class="queue-popup-index">' + (index + 1) + '</span>' : '') + '<img data-cover-song="' + index + '" src="' + esc(cover(song)) + '" alt=""><div class="track-info"><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></div><span class="track-playing" aria-label="当前歌曲"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="equalizer-bar equalizer-bar-one" d="M5 12v8"/><path class="equalizer-bar equalizer-bar-two" d="M12 4v16"/><path class="equalizer-bar equalizer-bar-three" d="M19 8v12"/></svg></span><div class="track-actions">' + actions + '</div>' + (queueView ? '' : '<span class="track-duration">' + songDuration(song) + '</span>') + '</div>';
   }
-  function card(song, index) { return '<button class="music-card focusable" data-song="' + index + '"><img data-cover-song="' + index + '" src="' + esc(cover(song)) + '" alt=""><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></button>'; }
-  function playlistCard(playlist) { var id = playlist.id || playlist.playlistId || "", title = playlist.name || playlist.title || "精选歌单", creator = playlist.creator && playlist.creator.nickname || "网易云"; return '<button class="playlist-card focusable" data-playlist-id="' + esc(id) + '" data-playlist-name="' + esc(title) + '"><div class="playlist-cover"><img src="' + esc(playlist.coverImgUrl || playlist.cover || "https://picsum.photos/seed/playlist/360/360") + '" alt=""><span>网易云</span></div><strong>' + esc(title) + '</strong><small>' + esc(creator) + ' · ' + esc(playlist.trackCount || 0) + ' 首</small></button>'; }
+  function card(song, index) { return '<button class="music-card focusable" data-song="' + index + '"><span class="poster-cover"><img data-cover-song="' + index + '" src="' + esc(cover(song, 300)) + '" alt=""></span><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></button>'; }
+  function playlistCard(playlist) { var id = playlist.id || playlist.playlistId || "", title = playlist.name || playlist.title || "精选歌单", creator = playlist.creator && playlist.creator.nickname || "网易云"; return '<button class="playlist-card focusable" data-playlist-id="' + esc(id) + '" data-playlist-name="' + esc(title) + '"><div class="playlist-cover"><img src="' + esc(sizedArtwork(playlist.coverImgUrl || playlist.cover || "https://picsum.photos/seed/playlist/360/360", 300)) + '" alt=""><span>网易云</span></div><strong>' + esc(title) + '</strong><small>' + esc(creator) + ' · ' + esc(playlist.trackCount || 0) + ' 首</small></button>'; }
   function rankingDefinitions() { return [
     {id: "3778678", name: "热歌榜", trackCount: 200},
     {id: "3779629", name: "新歌榜", trackCount: 100},
@@ -380,7 +426,7 @@
       if (pending) pending(1);
       api("/api/music/pic", "POST", "id=" + encodeURIComponent(song.id) + "&type=wy", function (err, data) {
         var resolved = data && data.data;
-        if (!err && isUrl(resolved)) { song.picUrl = resolved; image.src = resolved; }
+        if (!err && isUrl(resolved)) { song.picUrl = resolved; image.src = sizedArtwork(resolved, parentMatch(image, ".poster-cover", root) ? 300 : 160); }
         if (pending) pending(-1);
       });
     }
@@ -540,7 +586,7 @@
     });
   }
   function artistTabs(active) { return '<div class="detail-tabs"><button id="artist-hot-tab" class="tab focusable' + (active === "hot" ? ' is-active' : '') + '" type="button">热门歌曲</button><button id="artist-albums-tab" class="tab focusable' + (active === "albums" ? ' is-active' : '') + '" type="button">专辑</button></div>'; }
-  function artistHero(data) { var a = data.artist || {}, songs = Number(a.musicSize) || 0, albums = Number(a.albumSize) || 0, image = a.picUrl || a.img1v1Url; return '<section class="detail-hero artist-hero"><img src="' + esc(isUrl(image) ? image : cover(null)) + '" alt="' + esc(a.name || "歌手") + '"><div class="detail-hero-copy"><span class="detail-eyebrow">歌手详情</span><h1>' + esc(a.name || "未知歌手") + '</h1><p>' + esc(songs) + ' 首歌曲 · ' + esc(albums) + ' 张专辑</p>' + (a.alias && a.alias.length ? '<small>' + esc(a.alias.join(" · ")) + '</small>' : '') + '</div></section>'; }
+  function artistHero(data) { var a = data.artist || {}, songs = Number(a.musicSize) || 0, albums = Number(a.albumSize) || 0, image = a.picUrl || a.img1v1Url; return '<section class="detail-hero artist-hero"><img src="' + esc(isUrl(image) ? sizedArtwork(image, 300) : cover(null)) + '" alt="' + esc(a.name || "歌手") + '"><div class="detail-hero-copy"><span class="detail-eyebrow">歌手详情</span><h1>' + esc(a.name || "未知歌手") + '</h1><p>' + esc(songs) + ' 首歌曲 · ' + esc(albums) + ' 张专辑</p>' + (a.alias && a.alias.length ? '<small>' + esc(a.alias.join(" · ")) + '</small>' : '') + '</div></section>'; }
   function detailBackButton() { return nativeApp ? "" : '<button id="detail-back" class="back-button focusable" type="button">返回</button>'; }
   function bindDetailBack() { var button = document.getElementById("detail-back"); if (button) button.addEventListener("click", handleBack); }
   function renderArtistDetail(data, sourceSong) {
@@ -554,7 +600,7 @@
     document.getElementById("artist-hot-tab").addEventListener("click", function () { state.artistDetail.tab = "hot"; renderArtistDetail(state.artistDetail.data, state.artistDetail.sourceSong); });
     document.getElementById("artist-albums-tab").addEventListener("click", function () { state.artistDetail.tab = "albums"; state.artistAlbums = []; state.artistAlbumsOffset = 0; state.artistAlbumsMore = true; state.artistAlbumsError = ""; renderArtistDetail(state.artistDetail.data, state.artistDetail.sourceSong); loadArtistAlbums(false); });
   }
-  function albumCard(item) { var image = item.picUrl || item.blurPicUrl; return '<button class="album-card focusable" type="button" data-album-id="' + esc(item.id) + '"><img src="' + esc(isUrl(image) ? image : cover(null)) + '" alt=""><strong>' + esc(item.name || "未命名专辑") + '</strong><span>' + esc(item.publishTime ? String(new Date(Number(item.publishTime)).getFullYear()) : "未知年份") + ' · ' + esc(item.size || 0) + ' 首</span></button>'; }
+  function albumCard(item) { var image = item.picUrl || item.blurPicUrl; return '<button class="album-card focusable" type="button" data-album-id="' + esc(item.id) + '"><span class="poster-cover"><img src="' + esc(isUrl(image) ? sizedArtwork(image, 300) : cover(null)) + '" alt=""></span><strong>' + esc(item.name || "未命名专辑") + '</strong><span>' + esc(item.publishTime ? String(new Date(Number(item.publishTime)).getFullYear()) : "未知年份") + ' · ' + esc(item.size || 0) + ' 首</span></button>'; }
   function renderArtistDetailBody() {
     var box = document.getElementById("artist-detail-body"), detail = state.artistDetail, songs, html, savedFocus, scrollTop;
     if (!box || !detail) return;
@@ -609,7 +655,7 @@
   function renderAlbumDetail(data) {
     var a = data.album || {}, songs = data.songs || [], artistName = a.artist && a.artist.name || (a.artists && a.artists[0] && a.artists[0].name) || "未知歌手", image = a.picUrl || a.blurPicUrl;
     state.albumDetail = {data: data, songs: songs};
-    content.innerHTML = detailBackButton() + '<section class="detail-hero album-hero"><img src="' + esc(isUrl(image) ? image : cover(null)) + '" alt="' + esc(a.name || "专辑") + '"><div class="detail-hero-copy"><span class="detail-eyebrow">专辑详情</span><h1>' + esc(a.name || "未命名专辑") + '</h1><p>' + esc(artistName) + ' · ' + esc(formatDate(a.publishTime)) + ' · ' + esc(a.size || songs.length) + ' 首</p><small>' + esc((a.description || "").replace(/\s+/g, " ").slice(0, 180)) + '</small></div></section><div class="detail-list-heading"><h2>专辑歌曲</h2><span>' + esc(songs.length) + ' 首</span><button id="album-play" class="primary detail-play-hot focusable" type="button">' + controlIcon("play") + '<span>播放专辑</span></button></div><div id="album-detail-body" class="track-list">' + (songs.length ? songs.map(track).join("") : '<div class="empty">暂无歌曲</div>') + '</div>';
+    content.innerHTML = detailBackButton() + '<section class="detail-hero album-hero"><img src="' + esc(isUrl(image) ? sizedArtwork(image, 300) : cover(null)) + '" alt="' + esc(a.name || "专辑") + '"><div class="detail-hero-copy"><span class="detail-eyebrow">专辑详情</span><h1>' + esc(a.name || "未命名专辑") + '</h1><p>' + esc(artistName) + ' · ' + esc(formatDate(a.publishTime)) + ' · ' + esc(a.size || songs.length) + ' 首</p><small>' + esc((a.description || "").replace(/\s+/g, " ").slice(0, 180)) + '</small></div></section><div class="detail-list-heading"><h2>专辑歌曲</h2><span>' + esc(songs.length) + ' 首</span><button id="album-play" class="primary detail-play-hot focusable" type="button">' + controlIcon("play") + '<span>播放专辑</span></button></div><div id="album-detail-body" class="track-list">' + (songs.length ? songs.map(track).join("") : '<div class="empty">暂无歌曲</div>') + '</div>';
     bindDetailBack();
     document.getElementById("album-play").addEventListener("click", function () { if (songs.length) { state.playbackList = songs.slice(0); state.playbackListSource = "album"; play(songs[0]); } });
     bindSongActions(document.getElementById("album-detail-body"), songs); focusTarget(document.getElementById("detail-back") || document.getElementById("album-play"));
@@ -643,7 +689,7 @@
     if (loggedIn) document.getElementById("account-logout").addEventListener("click", logout);
     else { document.getElementById("account-scan-login").onclick = function () { openScan("login"); }; document.getElementById("account-scan-register").onclick = function () { openScan("register"); }; document.getElementById("account-login").addEventListener("click", function () { openLogin("login"); }); document.getElementById("account-register").addEventListener("click", function () { openLogin("register"); }); document.getElementById("account-reset").addEventListener("click", function () { openLogin("reset"); }); }
    restoreBookmark(content, savedFocus); }
-  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); renderSidePanel(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
+  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
   function toggleQueue(song) {
     if (!song) return;
     if (isQueued(song)) removeQueuedSong(song);
@@ -699,7 +745,7 @@
   function commentTime(item) { return item.timeStr || (item.time ? new Date(item.time).toLocaleDateString() : ""); }
   function commentMarkup(items, startIndex) { return items.length ? items.map(function (x, index) { var user = x.user && (x.user.nickname || x.user.name) || x.user || x.nickname || "音乐用户", profile = typeof x.user === "object" ? x.user : null, meta = commentTime(x), likes = x.likedCount ? " · " + x.likedCount + " 赞" : ""; return '<div class="comment focusable" tabindex="0" data-comment-index="' + ((startIndex || 0) + index) + '"><img class="comment-avatar" src="' + esc(commentAvatar(x, profile)) + '" alt=""><div class="comment-body"><div class="comment-meta"><strong>' + esc(user) + '</strong>' + (meta || likes ? '<span>' + esc(meta) + esc(likes) + '</span>' : '') + '</div><p>' + esc(x.content || x.comment || x.text || "") + '</p></div></div>'; }).join("") : '<div class="state">暂无评论</div>'; }
   function commentDisplayCount() { return state.commentsTotal ? String(state.commentsTotal) : (state.commentsLoading ? "…" : String(state.comments.length)); }
-  function updateCommentCount() { var total = state.commentsTotal || 0, count = document.getElementById("comment-count"), sideCount = document.getElementById("side-comment-count"), toggle = document.getElementById("player-comments-toggle"); if (count) { count.textContent = total ? String(total) : (state.commentsLoading ? "…" : String(state.comments.length)); count.parentNode.setAttribute("aria-label", "评论 " + (total || state.comments.length) + " 条"); } if (sideCount) sideCount.textContent = total ? state.comments.length + "/" + total + " 条" : (state.commentsLoading ? "加载中…" : state.comments.length + " 条"); if (toggle && state.commentsHidden) renderCommentsVisibility(); }
+  function updateCommentCount() { var total = state.commentsTotal || 0, count = document.getElementById("comment-count"), toggle = document.getElementById("player-comments-toggle"); if (count) { count.textContent = total ? String(total) : (state.commentsLoading ? "…" : String(state.comments.length)); count.parentNode.setAttribute("aria-label", "评论 " + (total || state.comments.length) + " 条"); } if (toggle && state.commentsHidden) renderCommentsVisibility(); }
   function lyricMarkup() { return state.lyricLines.length ? state.lyricLines.map(function (line, index) { var timed = line.words && line.words.length, text = timed ? line.words.map(function (word, wordIndex) { return '<span class="lyric-word" data-word-index="' + wordIndex + '">' + esc(word.text) + '</span>'; }).join("") : esc(line.text); return '<div class="lyric-line' + (timed ? ' has-word-timing' : '') + (index === state.lyricIndex ? ' active' : '') + '" data-lyric-index="' + index + '">' + text + '</div>'; }).join("") : '<div class="state">' + esc(state.lyricsText || "暂无歌词") + '</div>'; }
   function renderOverlayLyrics() {
     var root = document.getElementById("overlay-lyrics"), four = state.commentsHidden && !!state.lyricLines.length, markup;
@@ -749,7 +795,7 @@
     if (state.playbackStatus !== "playing" || playbackPaused()) track.style.transition = "none";
     overlayLyricView.time = time;
   }
-  function stopLyricMotion() { var track = document.querySelector("#overlay-lyrics .four-lyric-track"); if (track) track.style.transition = "none"; }
+  function stopLyricMotion() { var track = document.querySelector("#overlay-lyrics .four-lyric-track"); if (track && track.style.transition !== "none") track.style.transition = "none"; }
   function loadMoreComments(root) {
     if (!root || !state.playerOpen || state.commentsHidden || root.clientHeight <= 0 || state.commentsLoading || Date.now() < state.commentsRetryAt) return;
     if (state.commentsError && !state.comments.length) loadCommentsPage(0, state.playToken);
@@ -812,15 +858,6 @@
     commentView.count = state.comments.length;
     if (reset && hadFocus && state.playerOpen) document.getElementById("player-close").focus();
   }
-  function renderSidePanel() {
-    var savedFocus = bookmark(side), song = state.current, lyricsBox = document.getElementById("side-lyrics"), lyricScroll = lyricsBox ? lyricsBox.scrollTop : 0;
-    // The home playlist page prioritizes poster density; fullscreen playback still owns lyrics.
-    if (!song || state.page === "recommend") { side.innerHTML = ""; return; }
-    side.innerHTML = '<div id="side-lyrics" class="lyrics" tabindex="-1" aria-label="同步歌词">' + lyricMarkup() + '</div>';
-    lyricsBox = document.getElementById("side-lyrics");
-    if (lyricsBox) lyricsBox.scrollTop = lyricScroll; restoreBookmark(side, savedFocus);
-    updateLyrics(playbackPosition(), true);
-  }
   function modeIcon(mode) {
     var attrs = 'viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
     if (mode === "shuffle") return '<svg ' + attrs + '><path d="m18 3 3 3-3 3M18 15l3 3-3 3M3 6h3c5 0 7 12 12 12h3M3 18h3c1.6 0 3-1.2 4.4-3.2M14 9.2C15.4 7.2 16.7 6 18 6h3"/></svg>';
@@ -829,8 +866,7 @@
   function renderQueueButton() {
     var button = document.getElementById("queue-open"), count = playbackItems().length, label = "播放列表 " + count;
     if (!button) return;
-    if (button.getAttribute("aria-label") !== label) button.innerHTML = controlIcon("queue") + '<span>播放列表 <b>' + count + '</b></span>';
-    button.setAttribute("aria-label", label); button.title = label;
+    if (button.getAttribute("aria-label") !== label) { button.innerHTML = controlIcon("queue") + '<span>播放列表 <b>' + count + '</b></span>'; button.setAttribute("aria-label", label); button.title = label; }
   }
   function playModeInfo() { var modes = {list: {label: "列表循环"}, one: {label: "单曲循环"}, shuffle: {label: "随机播放"}}; return modes[state.playMode] || modes.list; }
   function controlIcon(name) {
@@ -842,7 +878,7 @@
     if (name === "close") return '<svg ' + attrs + '><path d="m15 5-7 7 7 7"/></svg>';
     return '<svg ' + attrs + '><path class="play-triangle" d="m9 5 10 7-10 7V5Z"/></svg>';
   }
-  function setControlIcon(id, name, label) { var button = document.getElementById(id); if (!button) return; button.innerHTML = controlIcon(name); if (label) { button.title = label; button.setAttribute("aria-label", label); } }
+  function setControlIcon(id, name, label) { var button = document.getElementById(id); if (!button) return; if (button.getAttribute("data-control-icon") !== name) { button.innerHTML = controlIcon(name); button.setAttribute("data-control-icon", name); } if (label && button.getAttribute("aria-label") !== label) { button.title = label; button.setAttribute("aria-label", label); } }
   function renderControlIcons() { setControlIcon("player-close", "close", "返回"); setControlIcon("prev", "prev", "上一首"); setControlIcon("play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("next", "next", "下一首"); renderQueueButton(); setControlIcon("overlay-prev", "prev", "上一首"); setControlIcon("overlay-play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("overlay-next", "next", "下一首"); setControlIcon("overlay-queue", "queue", "播放列表"); renderOverlayFavorite(); }
   function renderOverlayFavorite() {
     var button = document.getElementById("overlay-favorite"), selected = isFavorite(state.current), label = selected ? "取消收藏" : "收藏歌曲";
@@ -876,7 +912,7 @@
     syncCommentMotion();
   }
   function setPlaybackButtonState(playing) { setControlIcon("play", playing ? "pause" : "play", playing ? "暂停" : "播放"); setControlIcon("overlay-play", playing ? "pause" : "play", playing ? "暂停" : "播放"); }
-  function renderPlayMode() { var info = playModeInfo(), mode = document.getElementById("play-mode"), repeat = document.getElementById("player-repeat"); if (mode) { mode.innerHTML = modeIcon(state.playMode) + '<span>' + info.label + '</span>'; mode.title = "播放顺序：" + info.label; mode.setAttribute("aria-label", "播放顺序：" + info.label); } if (repeat) { repeat.innerHTML = modeIcon(state.playMode); repeat.title = "播放顺序：" + info.label; repeat.setAttribute("aria-label", "切换播放顺序，当前为" + info.label); repeat.classList.toggle("is-on", state.playMode !== "list"); } }
+  function renderPlayMode() { var info = playModeInfo(), mode = document.getElementById("play-mode"), repeat = document.getElementById("player-repeat"); if (mode && mode.getAttribute("data-play-mode") !== state.playMode) { mode.innerHTML = modeIcon(state.playMode) + '<span>' + info.label + '</span>'; mode.title = "播放顺序：" + info.label; mode.setAttribute("aria-label", "播放顺序：" + info.label); mode.setAttribute("data-play-mode", state.playMode); } if (repeat && repeat.getAttribute("data-play-mode") !== state.playMode) { repeat.innerHTML = modeIcon(state.playMode); repeat.title = "播放顺序：" + info.label; repeat.setAttribute("aria-label", "切换播放顺序，当前为" + info.label); repeat.classList.toggle("is-on", state.playMode !== "list"); repeat.setAttribute("data-play-mode", state.playMode); } }
   function renderPlayerOverlay() {
     var overlay = document.getElementById("player-overlay"), song = state.current, title = document.getElementById("overlay-title"), metadata = document.getElementById("overlay-track-meta"), coverNode = document.getElementById("overlay-cover"), coverUrl, lyrics = document.getElementById("overlay-lyrics"), comments = document.getElementById("overlay-comments"), status = document.getElementById("lyric-status"), lyricScroll = lyrics ? lyrics.scrollTop : 0;
     if (!overlay) return;
@@ -912,12 +948,13 @@
   }
   function updateLyrics(time, force) {
     var next = -1, i, nodes, active, changed, line, wordNodes, j, word, progress, isActive, wordStyle;
+    if (!state.playerOpen && !force) return;
     for (i = 0; i < state.lyricLines.length; i++) { if (state.lyricLines[i].time >= 0 && state.lyricLines[i].time <= time) next = i; }
     // Keep the first lyric visibly selected before the first timed line begins
     // or while a WebView has not produced its first timeupdate event yet.
     if (next < 0 && state.lyricLines.length) next = 0;
     changed = !!force || next !== state.lyricIndex; state.lyricIndex = next;
-    nodes = document.querySelectorAll("#overlay-lyrics .lyric-line, #side-lyrics .lyric-line");
+    nodes = document.querySelectorAll("#overlay-lyrics .lyric-line");
     for (i = 0; i < nodes.length; i++) {
       isActive = parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next;
       nodes[i].classList.toggle("active", isActive);
@@ -938,8 +975,6 @@
     if (!changed) return;
     active = next >= 0 ? document.querySelector('#overlay-lyrics .lyric-line[data-lyric-index="' + next + '"]') : null;
     if (!overlayLyricView.four) scrollLyricIntoView(active);
-    active = next >= 0 ? document.querySelector('#side-lyrics .lyric-line[data-lyric-index="' + next + '"]') : null;
-    scrollLyricIntoView(active);
   }
   function loadCommentsPage(page, token, append) {
     var song = state.current, offset, shouldAppend = !!append && page > 0, requestToken = state.playToken, settled = false;
@@ -966,8 +1001,8 @@
   }
   function loadLyricsComments(song, token) {
     var id = encodeURIComponent(song.id || "");
-    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderSidePanel(); renderPlayerOverlay(); });
-    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderSidePanel(); renderPlayerOverlay(); updateLyrics(playbackPosition(), true); });
+    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderPlayerOverlay(); });
+    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderPlayerOverlay(); updateLyrics(playbackPosition(), true); });
     state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; loadCommentsPage(0, token);
   }
   function playbackItems() {
@@ -984,7 +1019,7 @@
     if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
     playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
     state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.lyricsWordLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
-    document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderSidePanel(); renderPlayerOverlay(); syncProgress();
+    document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderPlayerOverlay(); syncProgress();
     loadLyricsComments(song, state.playToken);
     if (nativePlayer && !fromNative) { nativePendingSelection = ++nativeSelection; nativePlayer.command("select", JSON.stringify(nativeSnapshot())); }
   }
@@ -1346,18 +1381,21 @@
   document.addEventListener("mouseup", finishSeek);
   document.addEventListener("touchend", finishSeek);
   document.addEventListener("touchcancel", finishSeek);
-  function syncPlaybackVisuals(playing) { document.getElementById("player-cover").classList.toggle("is-playing", playing); document.getElementById("overlay-cover").classList.toggle("is-playing", playing); }
+  function syncPlaybackVisuals(playing) { var covers = [document.getElementById("player-cover"), document.getElementById("overlay-cover")], i; for (i = 0; i < covers.length; i++) if (covers[i].classList.contains("is-playing") !== playing) covers[i].classList.toggle("is-playing", playing); }
   function syncProgress(previewTime) {
     var seek = document.getElementById("seek"), overlaySeek = document.getElementById("overlay-seek"), total = playbackDuration(), hasDuration = total > 0, time = typeof previewTime === "number" ? previewTime : playbackPosition(), percent, elapsed, duration, sliders = [seek, overlaySeek], i;
     if (state.seekInput && typeof previewTime !== "number" && hasDuration) time = total * parseFloat(state.seekInput.value) / 100;
     percent = hasDuration ? Math.max(0, Math.min(100, time / total * 100)) : 0;
-    for (i = 0; i < sliders.length; i++) {
-      sliders[i].value = percent;
-      sliders[i].style.backgroundImage = "linear-gradient(to right,#c7f38d " + percent + "%,#405244 " + percent + "%)";
+    if (progressView.percent !== percent) {
+      for (i = 0; i < sliders.length; i++) {
+        sliders[i].value = percent;
+        sliders[i].style.backgroundImage = "linear-gradient(to right,#c7f38d " + percent + "%,#405244 " + percent + "%)";
+      }
+      progressView.percent = percent;
     }
     elapsed = fmt(time); duration = hasDuration ? fmt(total) : "00:00";
-    document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("player-duration").textContent = duration;
-    document.getElementById("overlay-elapsed").textContent = elapsed; document.getElementById("overlay-duration").textContent = duration;
+    if (progressView.elapsed !== elapsed) { document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("overlay-elapsed").textContent = elapsed; progressView.elapsed = elapsed; }
+    if (progressView.duration !== duration) { document.getElementById("player-duration").textContent = duration; document.getElementById("overlay-duration").textContent = duration; progressView.duration = duration; }
   }
   function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (status !== "playing") stopLyricMotion(); if (changed) updateTrackStates(); if (status === "failed") { var label = document.getElementById("lyric-status"); if (label) { label.textContent = playbackErrorText(); label.hidden = false; } } syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });

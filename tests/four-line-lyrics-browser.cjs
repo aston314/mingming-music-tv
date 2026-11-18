@@ -61,12 +61,10 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
       await page.locator('#player-comments-toggle').click();
       assert.equal(await page.locator('#overlay-track-meta').textContent(), '测试歌手 · 测试专辑');
       assert.equal(await page.locator('#overlay-cover').getAttribute('src'), 'https://p3.music.126.net/test-cover.jpg?keep=1&param=400y400#cover', 'fullscreen CDN artwork requests its display size and retains other parameters');
-      assert.equal(await page.locator('#player-cover').getAttribute('src'), song.picUrl, 'other cover data stays unchanged');
+      assert.equal(await page.locator('#player-cover').getAttribute('src'), 'https://p3.music.126.net/test-cover.jpg?keep=1&param=160y160#cover', 'footer artwork requests a thumbnail without mutating song data');
       assert.equal(await page.locator('.player-overlay-head').innerText(), '测试歌手 · 测试专辑');
       assert.equal(await page.locator('.overlay-song-heading span').count(), 0, 'song title row only contains the title and favorite');
       releaseLyrics();
-      await page.waitForSelector('#side-lyrics .has-word-timing.active');
-      const sideFont = await page.locator('#side-lyrics .active').evaluate(node => getComputedStyle(node).fontSize);
       await page.waitForSelector('#overlay-lyrics .has-word-timing.active');
       assert.equal(await page.locator('#overlay-lyrics .lyric-loading').count(), 0);
       assert.equal(await page.locator('#overlay-lyrics .lyric-line').count(), texts.length);
@@ -83,7 +81,7 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
       assert.equal(view.inlineGradient.indexOf('var('), -1, 'karaoke does not depend on unsupported CSS custom properties');
       assert.equal(view.wordClip, 'text');
       assert.ok(view.wordProgress.some(p => p > 0 && p < 100), 'word timing retains partial progress');
-      assert.equal(await page.locator('#side-lyrics .active').evaluate(node => getComputedStyle(node).fontSize), sideFont, 'side lyrics retain their style');
+      assert.equal(await page.locator('#side-lyrics').count(), 0, 'fullscreen keeps the only lyric view');
       await page.waitForTimeout(600);
       assert.deepEqual(await inspect(), view, 'paused lyrics and word progress stay still');
       if (screenshotsDir) await page.screenshot({path: path.join(screenshotsDir, `four-line-lyrics-${size.width}.png`)});

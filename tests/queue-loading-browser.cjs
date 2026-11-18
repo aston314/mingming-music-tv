@@ -75,10 +75,8 @@ module.exports = async function testQueueLoading({browser, url, screenshotsDir})
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'queue-open');
     await page.locator('.nav-item[data-page="search"]').click();
-    await page.waitForSelector('#side-lyrics .active');
-    assert.deepEqual(await page.locator('#side-lyrics').evaluate(el => ({tab: el.tabIndex, focusable: el.classList.contains('focusable')})), {tab: -1, focusable: false});
-    await page.locator('#side-lyrics').evaluate(el => {el.focus();});
-    assert.equal(await page.locator('#side-lyrics').evaluate(el => getComputedStyle(el).boxShadow), 'none');
+    assert.equal(await page.locator('#side-panel, #side-lyrics').count(), 0, 'navigation pages contain no side playback view');
+    await page.locator('#search-input').focus();
     await page.keyboard.press('ArrowRight');
     assert.equal(await page.evaluate(() => document.getElementById('content').contains(document.activeElement) && document.activeElement.classList.contains('focusable')), true);
 

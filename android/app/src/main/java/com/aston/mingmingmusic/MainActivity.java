@@ -2,6 +2,8 @@ package com.aston.mingmingmusic;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -25,6 +27,8 @@ public final class MainActivity extends Activity {
     private WebView web;
     private boolean ready, destroyed;
     private boolean explicitExit;
+    private boolean backPending;
+    private AlertDialog exitDialog;
     private int startupGeneration;
     private Thread startupWorker;
     private FrameLayout root;
@@ -110,7 +114,22 @@ public final class MainActivity extends Activity {
             if (!destroyed && generation == startupGeneration && !ready && page == web) startup.setStatus("音乐界面加载超时，请重试", false);
         } }, 30000);
     }
-    @Override public boolean dispatchKeyEvent(KeyEvent event) { if (ready && web != null && event.getAction() == KeyEvent.ACTION_DOWN) { int code = event.getKeyCode(); if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) { web.evaluateJavascript("window.MingmingTVKey&&window.MingmingTVKey(" + code + ");", null); return true; } } return super.dispatchKeyEvent(event); }
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        int code = event.getKeyCode();
+        if (exitDialog != null) return super.dispatchKeyEvent(event);
+        if (isBackKeyCode(code)) {
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) onBackPressed();
+            return true;
+        }
+        if (ready && web != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
+                web.evaluateJavascript("window.MingmingTVKey&&window.MingmingTVKey(" + code + ");", null);
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+    static boolean isBackKeyCode(int code) { return code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE; }
     private static final class MusicBridge {
         @JavascriptInterface public String read() { return CoreService.playbackState(); }
         @JavascriptInterface public void command(String operation, String payload) { CoreService.playerCommand(operation, payload); }
@@ -119,20 +138,46 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void exit() {
             runOnUiThread(new Runnable() { @Override public void run() {
                 if (destroyed) return;
-                explicitExit = true;
-                // The service pauses, checkpoints and stops its own foreground
-                // notification before the Activity is torn down.
-                CoreService.exitPlayback();
-                finish();
+                confirmExit();
             } });
         }
     }
     @Override protected void onResume() { super.onResume(); immersive(); if (startup != null) startup.resumeAnimation(); if (web != null) { web.onResume(); web.evaluateJavascript("window.MingmingTVForeground&&window.MingmingTVForeground()", null); } }
     @Override public void onBackPressed() {
-        if (!ready || web == null) { explicitExit = true; CoreService.exitPlayback(); super.onBackPressed(); return; }
+        if (destroyed || explicitExit || backPending) return;
+        if (exitDialog != null) { exitDialog.cancel(); return; }
+        if (!ready || web == null) { showExitConfirmation(); return; }
+        backPending = true;
         web.evaluateJavascript("window.MingmingTVBack?window.MingmingTVBack():false", new ValueCallback<String>() {
-            @Override public void onReceiveValue(String handled) { if (!"true".equals(handled)) { explicitExit = true; CoreService.exitPlayback(); MainActivity.super.onBackPressed(); } }
+            @Override public void onReceiveValue(String handled) {
+                backPending = false;
+                if (!destroyed && !explicitExit && !"true".equals(handled)) showExitConfirmation();
+            }
         });
+    }
+    private void showExitConfirmation() {
+        if (exitDialog != null || destroyed || explicitExit) return;
+        exitDialog = new AlertDialog.Builder(this)
+            .setTitle("退出" + getString(com.aston.mingmingmusic.R.string.app_name) + "？")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("退出", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) { confirmExit(); }
+            }).create();
+        exitDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override public void onDismiss(DialogInterface dialog) {
+                exitDialog = null;
+                if (!destroyed && !explicitExit) { immersive(); if (web != null) web.requestFocus(); }
+            }
+        });
+        exitDialog.show();
+        exitDialog.getButton(AlertDialog.BUTTON_NEGATIVE).requestFocus();
+    }
+    private void confirmExit() {
+        if (destroyed || explicitExit) return;
+        explicitExit = true;
+        // Stop and checkpoint the player before tearing down the Activity.
+        CoreService.exitPlayback();
+        finish();
     }
     private void cancelPhoneInput() {
         final CoreEndpoint endpoint = CoreService.endpoint();
@@ -147,5 +192,5 @@ public final class MainActivity extends Activity {
         } }, "mingming-phone-cancel").start();
     }
     @Override protected void onPause() { cancelPhoneInput(); CoreService.backgroundPlayback(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.evaluateJavascript("window.MingmingTVBackground&&window.MingmingTVBackground()", null); web.onPause(); } super.onPause(); }
-    @Override protected void onDestroy() { destroyed = true; startupGeneration++; if (startupWorker != null) startupWorker.interrupt(); handler.removeCallbacksAndMessages(null); if (startup != null) startup.pauseAnimation(); if (web != null) { web.destroy(); web = null; } if (explicitExit) CoreService.exitPlayback(); super.onDestroy(); }
+    @Override protected void onDestroy() { destroyed = true; startupGeneration++; if (startupWorker != null) startupWorker.interrupt(); handler.removeCallbacksAndMessages(null); if (exitDialog != null) exitDialog.dismiss(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.destroy(); web = null; } if (explicitExit) CoreService.exitPlayback(); super.onDestroy(); }
 }

@@ -63,6 +63,16 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     await checkPausedRestore(page, snapshot);
     assert.equal(sourceRequests, 0, 'startup must not resolve or fetch audio');
     assert.equal(await page.locator('#side-lyrics').count(), 0, 'home page keeps the playlist area clear of lyrics');
+    for (const navPage of ['recommend', 'search', 'playlists', 'queue', 'favorites', 'account']) {
+      await page.locator('.nav-item[data-page="' + navPage + '"]').click();
+      const navigationLayout = await page.locator('#content').evaluate(node => ({
+        right: node.getBoundingClientRect().right,
+        workspaceRight: node.parentNode.getBoundingClientRect().right,
+        sideViews: document.querySelectorAll('#side-panel, #side-lyrics, #side-comments').length
+      }));
+      assert.equal(navigationLayout.sideViews, 0, navPage + ' has no side lyrics or comments');
+      assert.ok(Math.abs(navigationLayout.right - navigationLayout.workspaceRight) < 1, navPage + ' fills the available width');
+    }
     // The footer and fullscreen open the same active-source popup. Custom
     // library membership is separate from the two-song playback source.
     await page.locator('[data-page="favorites"]').click();
@@ -92,8 +102,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     await page.locator('[data-page="queue"]').click();
     await page.locator('[data-library-tab="recent"]').click();
     const currentRow = page.locator('.track-list [data-track-id="resume-first"]');
-    await page.waitForSelector('#side-lyrics .lyric-line.active');
-    assert.equal(await page.locator('#side-lyrics .active').textContent(), '恢复位置对应歌词');
+    assert.equal(await page.locator('#side-lyrics').count(), 0, 'recent playback keeps the full content width');
     await page.waitForSelector('.track-list .is-current .track-playing svg');
     assert.equal(await currentRow.locator('.equalizer-bar').first().evaluate(el => getComputedStyle(el).animationPlayState), 'paused');
     await page.locator('#now-playing').click();
@@ -102,7 +111,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     assert.ok(await page.locator('#overlay-lyrics .lyric-line').count() > 2, 'fullscreen lyrics keep the complete list visible');
     for (const size of [{width: 1920, height: 1080}, {width: 960, height: 540}]) {
       await page.setViewportSize(size);
-      for (const container of ['#side-lyrics', '#overlay-lyrics']) {
+      for (const container of ['#overlay-lyrics']) {
         const typography = await page.locator(container).evaluate(node => {
           const active = getComputedStyle(node.querySelector('.active'));
           const normal = getComputedStyle(node.querySelector('.lyric-line:not(.active)'));

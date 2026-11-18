@@ -10,10 +10,14 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
     .replace(/\b(?:inset|gap|aspect-ratio|grid-template-columns|grid-template-rows)\s*:[^;}]*;?/g, '')
     .replace(/display:grid/g, 'display:block');
   const track = {id: 'legacy-player', name: '安卓兼容歌词', artist: '测试歌手', dt: 20000, picUrl: 'https://example.invalid/legacy-cover.svg'};
+  const libraryTracks = [track, {...track, id: 'legacy-second', name: '第二首歌曲'}];
   for (const textClip of [true, false]) {
     const context = await browser.newContext({viewport: {width: 960, height: 540}, hasTouch: true});
     try {
-      await context.addInitScript(({track, textClip}) => {
+      await context.addInitScript(({track, textClip, libraryTracks}) => {
+        localStorage.setItem('mingming.searchHistory', JSON.stringify(['周杰伦', '林俊杰', '陈奕迅', '孙燕姿', '五月天', '王菲', '张学友', '许巍', '李健', '陶喆']));
+        if (document.documentElement) document.documentElement.className += ' legacy-layout';
+        else document.addEventListener('DOMContentLoaded', () => {document.documentElement.className += ' legacy-layout';});
         if (!textClip) {
           const create = document.createElement;
           document.createElement = function (name) {
@@ -22,22 +26,119 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
             return node;
           };
         }
-        window.legacyPlayback = {snapshot: {schema: 1, track, position: 2.5, duration: 20, mode: 'list', list: [track]}, state: 'paused', ready: true, wantPlay: false};
+        window.legacyPlayback = {snapshot: {schema: 1, track, position: 2.5, duration: 20, mode: 'list', list: libraryTracks}, state: 'paused', ready: true, wantPlay: false};
         window.MingmingNativePlayer = {read() {return JSON.stringify(window.legacyPlayback);}, command() {}};
-      }, {track, textClip});
+      }, {track, textClip, libraryTracks});
       await context.route('**/app.css', route => route.fulfill({contentType: 'text/css', body: legacyCSS}));
-      await context.route('**/api/library', route => route.fulfill({json: {favorites: [], playlists: [], recent: []}}));
+      await context.route('**/api/library', route => route.fulfill({json: {favorites: libraryTracks, playlists: libraryTracks, recent: libraryTracks}}));
       await context.route('**/api/music/lrc', route => route.fulfill({json: {data: '[00:00.00]前一句\n[00:02.00]随歌声前进\n[00:10.00]下一句'}}));
       await context.route('**/api/word-lyric?*', route => route.fulfill({json: {data: {lyric: '[0,2000](0,2000,0)前一句\n[2000,8000](2000,1000,0)随(3000,1000,0)歌(4000,6000,0)声前进\n[10000,5000](10000,5000,0)下一句'}}}));
-      await context.route('**/api/netease/comments?*', route => route.fulfill({json: {comments: [], total: 0, more: false}}));
+      await context.route('**/api/netease/comments?*', route => route.fulfill({json: {comments: [{user: {nickname: '评论用户', avatarUrl: track.picUrl}, timeStr: '昨天', content: '适合在电视上阅读的评论。'}], total: 1, more: false}}));
       await context.route('**/legacy-cover.svg', route => route.fulfill({contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#71965f"/></svg>'}));
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(url);
-      await page.waitForFunction(() => document.getElementById('player-title').textContent === '安卓兼容歌词');
+      try {
+        await page.waitForFunction(() => document.getElementById('player-title').textContent === '安卓兼容歌词', null, {timeout: 5000});
+      } catch (error) {
+        const initialState = await page.evaluate(() => {
+          let native = null;
+          try { native = window.MingmingNativePlayer && window.MingmingNativePlayer.read(); } catch (ignore) {}
+          return {title: document.getElementById('player-title') && document.getElementById('player-title').textContent, native: native, appScript: !!document.querySelector('script[src="/app.js"]'), errors: document.documentElement.className};
+        });
+        throw new Error(error.message + '; initial page state: ' + JSON.stringify(initialState));
+      }
+      await page.waitForSelector('#recommend-playlists .playlist-card');
+      const shellLayout = await page.evaluate(() => {
+        const cards = document.querySelectorAll('#recommend-playlists .playlist-card');
+        const first = cards[0].getBoundingClientRect(), second = cards[1].getBoundingClientRect();
+        const categories = document.querySelectorAll('.category-tab');
+        const categoryGap = categories[1].getBoundingClientRect().left - categories[0].getBoundingClientRect().right;
+        const logo = document.querySelector('.brand-mark').getBoundingClientRect();
+        const name = document.querySelector('.brand-name').getBoundingClientRect();
+        const nav = document.getElementById('nav-recommend');
+        nav.focus();
+        const focusStyle = getComputedStyle(nav);
+        const bar = document.querySelector('.player-bar').getBoundingClientRect();
+        const barItems = Array.from(document.querySelector('.player-bar').children).map(node => node.getBoundingClientRect());
+        const controlItems = Array.from(document.querySelector('.player-controls').children).map(node => node.getBoundingClientRect());
+        const rowGap = controlItems[1].left - controlItems[0].right;
+        return {
+          legacy: document.documentElement.className.indexOf('legacy-layout') >= 0,
+          gridDisplay: getComputedStyle(document.querySelector('.playlist-grid')).display,
+          playlistColumns: Math.abs(first.top - second.top) < 1 && second.left > first.right,
+          categoryGap: categoryGap,
+          selectedCategory: getComputedStyle(document.querySelector('.category-tab.is-active')).backgroundColor,
+          brandGap: (name.left - logo.right) / (window.__tvScale || 1),
+          focus: {outline: focusStyle.outlineStyle, radius: focusStyle.borderRadius, shadow: focusStyle.boxShadow},
+          barFits: barItems[barItems.length - 1].right <= bar.right + 1 && barItems.every((item, index) => !index || item.left >= barItems[index - 1].right),
+          controlGap: rowGap
+        };
+      });
+      assert.equal(shellLayout.legacy, true, 'legacy layout fallback is enabled');
+      assert.equal(shellLayout.gridDisplay, 'flex', 'playlist grid falls back to a flex row');
+      assert.equal(shellLayout.playlistColumns, true, 'popular playlists use multiple columns');
+      assert.ok(shellLayout.categoryGap >= 4, 'category filters have visible horizontal spacing');
+      assert.equal(shellLayout.selectedCategory, 'rgb(199, 243, 141)', 'selected filters retain their theme color without CSS variables');
+      assert.ok(Math.abs(shellLayout.brandGap - 18) < 1, 'logo and app name keep an exact, engine-independent spacing');
+      assert.equal(shellLayout.focus.outline, 'none', 'legacy focus avoids square outlines');
+      assert.match(shellLayout.focus.shadow, /199, 243, 141/, 'legacy focus uses the rounded shadow ring');
+      assert.ok(shellLayout.barFits, 'footer controls fit without overlap');
+      assert.ok(shellLayout.controlGap >= 8, 'footer controls have a visible gap');
+      await page.locator('#seek').focus();
+      assert.equal(await page.locator('#seek').evaluate(el => getComputedStyle(el).boxShadow), 'none', 'seek focus uses its thumb without an outer control ring');
+      if (screenshotsDir) await page.screenshot({path: path.join(screenshotsDir, 'legacy-home-' + textClip + '.png')});
+      await page.evaluate(() => window.MingmingTVBack());
+      const exitDialog = await page.evaluate(() => {
+        const root = document.getElementById('modal-root'), rect = root.getBoundingClientRect();
+        return {visible: !root.hidden, focused: document.activeElement.id, rect: [rect.left, rect.top, rect.width, rect.height]};
+      });
+      assert.equal(exitDialog.visible, true, 'Back opens the exit confirmation');
+      assert.equal(exitDialog.focused, 'exit-cancel', 'exit confirmation defaults focus to cancel');
+      assert.deepEqual(exitDialog.rect, [0, 0, 960, 540], 'legacy modal fills the visible viewport without inset');
+      await page.evaluate(() => window.MingmingTVBack());
+      await page.locator('.playlist-card').first().click();
+      await page.waitForSelector('#playlist-detail-body .track-row:nth-child(2)');
+      const songRowsGap = await page.evaluate(() => {
+        const rows = document.querySelectorAll('#playlist-detail-body .track-row');
+        return rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().bottom;
+      });
+      assert.ok(songRowsGap >= 8, 'song rows keep vertical spacing without flex gap');
+      await page.evaluate(() => window.MingmingTVBack());
+      await page.waitForSelector('.playlist-card');
+      await page.locator('[data-page="queue"]').click();
+      await page.waitForSelector('.track-list .track-row:nth-child(2)');
+      await page.locator('#queue-open').click();
+      await page.waitForSelector('#queue-popup .track-row:nth-child(2)');
+      const queueLayout = await page.evaluate(() => {
+        const rows = document.querySelectorAll('#queue-popup .track-row'), first = rows[0].getBoundingClientRect(), next = rows[1].getBoundingClientRect();
+        rows[0].focus();
+        const cover = rows[0].querySelector('img').getBoundingClientRect(), copy = rows[0].querySelector('.track-info').getBoundingClientRect();
+        const actions = rows[0].querySelectorAll('.track-action'), a = actions[0].getBoundingClientRect(), b = actions[1].getBoundingClientRect();
+        return {rowGap: next.top - first.bottom, coverGap: copy.left - cover.right, actionGap: b.left - a.right};
+      });
+      assert.ok(queueLayout.rowGap >= 8 && queueLayout.coverGap >= 8 && queueLayout.actionGap >= 4, 'queue popup rows and their action icons have separate gutters');
+      if (screenshotsDir) await page.screenshot({path: path.join(screenshotsDir, 'legacy-queue-' + textClip + '.png')});
+      await page.evaluate(() => window.MingmingTVBack());
+      await page.locator('#nav-account').click();
+      const accountLayout = await page.locator('.account-page').evaluate(panel => {
+        const nodes = Array.from(panel.querySelectorAll('.account-actions button')), boxes = nodes.map(node => node.getBoundingClientRect()), bounds = panel.getBoundingClientRect();
+        return {fits: boxes.every(box => box.left >= bounds.left && box.right <= bounds.right), separated: boxes.every((box, i) => boxes.slice(0, i).every(other => box.left >= other.right + 3 || box.right <= other.left - 3 || box.top >= other.bottom + 3 || box.bottom <= other.top - 3)), avatar: [panel.querySelector('.account-avatar').getBoundingClientRect().width, panel.querySelector('.account-avatar').getBoundingClientRect().height], loginColor: getComputedStyle(document.getElementById('account-login')).backgroundColor};
+      });
+      assert.ok(accountLayout.fits && accountLayout.separated, 'account actions wrap without overlap');
+      assert.ok(Math.abs(accountLayout.avatar[0] - accountLayout.avatar[1]) < 1, 'account avatar stays circular without CSS Grid');
+      assert.equal(accountLayout.loginColor, 'rgb(199, 243, 141)', 'login retains a visible primary background');
+      await page.locator('#account-login').click();
+      const authTabs = await page.locator('.modal-tabs').evaluate(panel => Array.from(panel.children).map(node => node.getBoundingClientRect()).every((box, i, boxes) => !i || box.left - boxes[i - 1].right >= 8));
+      assert.equal(authTabs, true, 'login/register/reset tabs have focus-ring clearance');
+      await page.evaluate(() => window.MingmingTVBack());
       await page.locator('.nav-item[data-page="search"]').click();
-      await page.waitForSelector('#side-lyrics .has-word-timing.active');
+      const historyLayout = await page.locator('.search-history-list').evaluate(panel => {
+        const boxes = Array.from(panel.children).map(node => node.getBoundingClientRect());
+        return boxes.length === 10 && boxes.every((box, i) => boxes.slice(0, i).every(other => box.left >= other.right + 3 || box.right <= other.left - 3 || box.top >= other.bottom + 3 || box.bottom <= other.top - 3));
+      });
+      assert.equal(historyLayout, true, 'all ten search-history chips remain separated when wrapping');
       await page.locator('#now-playing').focus();
       await page.evaluate(() => window.MingmingTVKey(23));
       await page.waitForSelector('#player-overlay:not([hidden])');
@@ -50,7 +151,9 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
       assert.deepEqual(layout.overlay, [0, 0, 960, 540], 'fullscreen remains on screen without inset');
       assert.equal(layout.display, 'flex', 'non-grid fallback is active');
       assert.ok(layout.lyricWidth > 100 && layout.lyricHeight > 100, 'legacy lyrics have visible space');
-      for (const selector of ['#side-lyrics', '#overlay-lyrics']) {
+      await page.waitForSelector('#overlay-comments .comment');
+      assert.ok(await page.locator('#overlay-comments .comment').evaluate(row => row.querySelector('.comment-body').getBoundingClientRect().left - row.querySelector('.comment-avatar').getBoundingClientRect().right) >= 8, 'comment text stays clear of its avatar');
+      for (const selector of ['#overlay-lyrics']) {
         const word = page.locator(selector + ' .active .lyric-word').first();
         const style = await word.evaluate(node => {const s = getComputedStyle(node); return {color: s.color, background: s.backgroundImage, clip: s.webkitBackgroundClip};});
         if (textClip) {assert.match(style.background, /199, 243, 141/); assert.equal(style.clip, 'text');}
@@ -76,5 +179,5 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
       assert.deepEqual(errors, []);
     } finally {await context.close();}
   }
-  console.log('Legacy CSS capability simulation: remote/touch entry, overlay bounds, lyric gradients and no-clip fallback passed');
+  console.log('Legacy CSS capability simulation: card grids, spacing, focus ring, exit modal, player, remote/touch entry and lyrics passed');
 };
