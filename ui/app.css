@@ -529,3 +529,10 @@ body{width:100%;height:100%;margin:0;overflow:hidden;background:#101713}
 .legacy-layout .modal-actions{align-items:center}
 .legacy-layout .focusable:not(.range):focus,.legacy-layout .focusable:not(.range).has-focus{outline:none!important;outline-offset:0;box-shadow:0 0 0 2px #17221b,0 0 0 5px #c7f38d!important}
 .legacy-layout #overlay-comments:focus{box-shadow:inset 0 0 0 3px #c7f38d!important}
+
+/* Keep ordinary lyric rows at one stable height. Enlarging the active row
+   changes every following row's layout on old WebViews and makes scrolling
+   visibly bounce at each sentence boundary. */
+#overlay-lyrics:not(.lyrics-four-line){scroll-behavior:auto;overflow-anchor:none}
+#overlay-lyrics:not(.lyrics-four-line) .lyric-line{height:42px;min-height:42px;padding:0;line-height:42px;transition:color .15s ease,opacity .15s ease,transform .15s ease;-webkit-transition:color .15s ease,opacity .15s ease,-webkit-transform .15s ease}
+#overlay-lyrics:not(.lyrics-four-line) .lyric-line.active{height:42px;min-height:42px;line-height:42px}

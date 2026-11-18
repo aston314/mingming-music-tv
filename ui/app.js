@@ -86,11 +86,14 @@
   var nativeApp = !!(window.MingmingTVApp || nativePlayer);
   var nativeSelection = 0, nativePendingSelection = 0;
   var commentMotion = {frame: null, last: 0, position: 0, scroll: 0, background: false, holdUntil: 0};
+  var lyricMotion = {frame: null, base: 0, at: 0, wordTime: -1};
   var commentView = {token: -1, count: 0};
   var overlayLyricView = {lines: null, message: null, four: false, width: 0, height: 0, index: -1, time: null, measure: null};
+  var lyricActiveNode = null;
   var requestFrame = window.requestAnimationFrame ? function (fn) { return window.requestAnimationFrame(fn); } : function (fn) { return window.setTimeout(function () { fn(Date.now()); }, 32); };
   var cancelFrame = window.cancelAnimationFrame ? function (id) { window.cancelAnimationFrame(id); } : function (id) { window.clearTimeout(id); };
   var lyricWordClipSupported = typeof document.createElement("span").style.webkitBackgroundClip !== "undefined";
+  function lyricClockNow() { return window.performance && typeof window.performance.now === "function" ? window.performance.now() : Date.now(); }
 
   function each(root, selector, fn) { var nodes = root.querySelectorAll(selector), i; for (i = 0; i < nodes.length; i++) fn(nodes[i]); }
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>\"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
@@ -163,7 +166,7 @@
     playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
     playback.resolving = data.state === "preparing";
     playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
-    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); renderQueueButton();
+    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); syncLyricTicker(playback.position); renderQueueButton();
     if (oldDuration !== playback.duration) updateTrackStates();
     return true;
   }
@@ -756,6 +759,7 @@
     // Retain every timed line. A padded, clipped track puts the current line
     // in slot two, including the start/end of a song, without duplicating it.
     root.innerHTML = four ? '<div class="four-lyric-track"><div class="lyric-spacer" aria-hidden="true"></div>' + markup + '<div class="lyric-spacer" aria-hidden="true"></div><div class="lyric-spacer" aria-hidden="true"></div></div>' : markup;
+    lyricActiveNode = null; lyricMotion.wordTime = -1;
     overlayLyricView.lines = state.lyricLines; overlayLyricView.message = state.lyricsText; overlayLyricView.four = four;
     overlayLyricView.width = 0; overlayLyricView.height = 0; overlayLyricView.index = -1; overlayLyricView.time = null;
     if (four) root.scrollTop = 0;
@@ -787,15 +791,47 @@
       }
       animate = !force && !resized && index === overlayLyricView.index + 1 && overlayLyricView.time != null && time >= overlayLyricView.time && time - overlayLyricView.time < 2 && state.playbackStatus === "playing" && !playbackPaused() && !document.hidden && !commentMotion.background;
       track.style.transition = animate ? "transform .45s cubic-bezier(.22,.68,.26,1)" : "none";
+      track.style.webkitTransition = animate ? "-webkit-transform .45s cubic-bezier(.22,.68,.26,1)" : "none";
       track.style.transform = "translateY(" + (-index * rowHeight) + "px)";
-      root.scrollTop = 0;
+      track.style.webkitTransform = "translateY(" + (-index * rowHeight) + "px)";
       overlayLyricView.width = width; overlayLyricView.height = height; overlayLyricView.index = index;
     }
     // A paused/buffering player cannot leave a scrolling animation running.
-    if (state.playbackStatus !== "playing" || playbackPaused()) track.style.transition = "none";
+    if (state.playbackStatus !== "playing" || playbackPaused()) { track.style.transition = "none"; track.style.webkitTransition = "none"; }
     overlayLyricView.time = time;
   }
-  function stopLyricMotion() { var track = document.querySelector("#overlay-lyrics .four-lyric-track"); if (track && track.style.transition !== "none") track.style.transition = "none"; }
+  function stopLyricMotion() {
+    var track = document.querySelector("#overlay-lyrics .four-lyric-track"), computed, transform;
+    if (!track) return;
+    // Freeze an in-flight transform before removing its transition. Otherwise
+    // Chromium 44 snaps to the next row when buffering or pausing begins.
+    computed = window.getComputedStyle(track); transform = computed.webkitTransform || computed.transform;
+    if (transform && transform !== "none") { track.style.webkitTransform = transform; track.style.transform = transform; }
+    track.style.transition = "none"; track.style.webkitTransition = "none";
+  }
+  function lyricTickerAllowed() {
+    var modal = document.getElementById("modal-root");
+    return state.playerOpen && state.current && state.lyricLines.length && state.playbackStatus === "playing" && !playbackPaused() && !document.hidden && !commentMotion.background && !state.queueOpen && modal && modal.hidden;
+  }
+  function stopLyricTicker() {
+    if (lyricMotion.frame !== null) cancelFrame(lyricMotion.frame);
+    lyricMotion.frame = null;
+  }
+  function syncLyricTicker(position) {
+    if (!lyricTickerAllowed()) { stopLyricTicker(); return; }
+    lyricMotion.base = typeof position === "number" ? position : playbackPosition();
+    lyricMotion.at = lyricClockNow();
+    if (lyricMotion.frame === null) lyricMotion.frame = requestFrame(runLyricTicker);
+  }
+  function runLyricTicker() {
+    var now, time, duration;
+    lyricMotion.frame = null;
+    if (!lyricTickerAllowed()) return;
+    now = lyricClockNow(); time = lyricMotion.base + Math.max(0, Math.min(1.5, (now - lyricMotion.at) / 1000));
+    duration = playbackDuration(); if (duration > 0) time = Math.min(duration, time);
+    updateLyrics(time, false);
+    if (lyricTickerAllowed()) lyricMotion.frame = requestFrame(runLyricTicker);
+  }
   function loadMoreComments(root) {
     if (!root || !state.playerOpen || state.commentsHidden || root.clientHeight <= 0 || state.commentsLoading || Date.now() < state.commentsRetryAt) return;
     if (state.commentsError && !state.comments.length) loadCommentsPage(0, state.playToken);
@@ -942,35 +978,65 @@
     container = active.parentNode;
     if (!container || container.clientHeight <= 0 || container.scrollHeight <= container.clientHeight) return;
     activeRect = rectOf(active); containerRect = rectOf(container);
+    // Re-centering every sentence makes Android 6 visibly bounce the scroll
+    // layer when timing updates land close together. Keep a broad safe band.
+    if (activeRect.top >= containerRect.top + containerRect.height * .26 && activeRect.bottom <= containerRect.bottom - containerRect.height * .26) return;
     target = container.scrollTop + activeRect.top - containerRect.top - (container.clientHeight - activeRect.height) / 2;
     max = container.scrollHeight - container.clientHeight;
     container.scrollTop = Math.max(0, Math.min(max, target));
   }
-  function updateLyrics(time, force) {
-    var next = -1, i, nodes, active, changed, line, wordNodes, j, word, progress, isActive, wordStyle;
-    if (!state.playerOpen && !force) return;
-    for (i = 0; i < state.lyricLines.length; i++) { if (state.lyricLines[i].time >= 0 && state.lyricLines[i].time <= time) next = i; }
-    // Keep the first lyric visibly selected before the first timed line begins
-    // or while a WebView has not produced its first timeupdate event yet.
-    if (next < 0 && state.lyricLines.length) next = 0;
-    changed = !!force || next !== state.lyricIndex; state.lyricIndex = next;
-    nodes = document.querySelectorAll("#overlay-lyrics .lyric-line");
-    for (i = 0; i < nodes.length; i++) {
-      isActive = parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next;
-      nodes[i].classList.toggle("active", isActive);
-      line = state.lyricLines[parseInt(nodes[i].getAttribute("data-lyric-index"), 10)];
-      wordNodes = nodes[i].querySelectorAll(".lyric-word");
-      for (j = 0; j < wordNodes.length; j++) {
-        word = line && line.words && line.words[j]; progress = !word || time <= word.time ? 0 : time >= word.end ? 100 : Math.max(0, Math.min(100, (time - word.time) / Math.max(.001, word.end - word.time) * 100));
-        wordStyle = wordNodes[j].style;
-        if (isActive) {
-          if (lyricWordClipSupported) {
-            wordStyle.backgroundImage = "-webkit-linear-gradient(left,#c7f38d 0,#c7f38d " + progress + "%,#dce9dd " + progress + "%,#dce9dd 100%)";
-            wordStyle.webkitBackgroundClip = "text"; wordStyle.backgroundClip = "text"; wordStyle.color = wordStyle.backgroundImage ? "transparent" : (progress > 0 ? "#c7f38d" : "#dce9dd");
-          } else wordStyle.color = progress > 0 ? "#c7f38d" : "#dce9dd";
-        } else if (wordStyle.color) { wordStyle.backgroundImage = ""; wordStyle.webkitBackgroundClip = ""; wordStyle.backgroundClip = ""; wordStyle.color = ""; }
-      }
+  function clearLyricWordStyles(node) {
+    var words, i, style;
+    if (!node) return;
+    words = node.querySelectorAll(".lyric-word");
+    for (i = 0; i < words.length; i++) { style = words[i].style; style.backgroundImage = ""; style.webkitBackgroundClip = ""; style.backgroundClip = ""; style.color = ""; words[i]._lyricProgress = null; }
+  }
+  function paintLyricWords(node, line, time, force) {
+    var wordNodes, j, word, progress, wordStyle, quantized;
+    if (!node || !line || !line.words || !line.words.length) return;
+    if (!force && lyricMotion.wordTime >= 0 && Math.abs(time - lyricMotion.wordTime) < .033) return;
+    lyricMotion.wordTime = time;
+    wordNodes = node.querySelectorAll(".lyric-word");
+    for (j = 0; j < wordNodes.length; j++) {
+      word = line.words[j]; wordStyle = wordNodes[j].style; progress = !word || time <= word.time ? 0 : time >= word.end ? 100 : Math.max(0, Math.min(100, (time - word.time) / Math.max(.001, word.end - word.time) * 100));
+      quantized = Math.round(progress * 10) / 10;
+      if (!force && wordNodes[j]._lyricProgress === quantized) continue;
+      wordNodes[j]._lyricProgress = quantized;
+      if (lyricWordClipSupported) {
+        wordStyle.backgroundImage = "-webkit-linear-gradient(left,#c7f38d 0,#c7f38d " + quantized + "%,#dce9dd " + quantized + "%,#dce9dd 100%)";
+        wordStyle.webkitBackgroundClip = "text"; wordStyle.backgroundClip = "text"; wordStyle.color = "transparent";
+      } else wordStyle.color = progress > 0 ? "#c7f38d" : "#dce9dd";
     }
+  }
+  function lyricIndexForTime(time) {
+    var lines = state.lyricLines, low = 0, high = lines.length - 1, answer = -1, middle, stamp;
+    if (!lines.length) return -1;
+    if (!isFinite(time)) time = 0;
+    while (low <= high) {
+      middle = Math.floor((low + high) / 2); stamp = Number(lines[middle].time);
+      if (stamp >= 0 && stamp <= time) { answer = middle; low = middle + 1; }
+      else if (stamp < 0) low = middle + 1;
+      else high = middle - 1;
+    }
+    return answer < 0 ? 0 : answer;
+  }
+  function updateLyrics(time, force) {
+    var next, i, nodes, active, changed, line, isActive;
+    if (!state.playerOpen && !force) return;
+    next = lyricIndexForTime(time);
+    changed = !!force || next !== state.lyricIndex || !lyricActiveNode; state.lyricIndex = next;
+    if (changed) {
+      clearLyricWordStyles(lyricActiveNode);
+      nodes = document.querySelectorAll("#overlay-lyrics .lyric-line");
+      for (i = 0; i < nodes.length; i++) {
+        isActive = parseInt(nodes[i].getAttribute("data-lyric-index"), 10) === next;
+        nodes[i].classList.toggle("active", isActive);
+        if (isActive) active = nodes[i];
+      }
+      lyricActiveNode = active || null;
+    } else active = lyricActiveNode;
+    line = next >= 0 ? state.lyricLines[next] : null;
+    paintLyricWords(active, line, time, !!force || changed);
     updateFourLineLyrics(next, time, force);
     if (!changed) return;
     active = next >= 0 ? document.querySelector('#overlay-lyrics .lyric-line[data-lyric-index="' + next + '"]') : null;
@@ -1016,6 +1082,7 @@
   }
   function playRelative(direction) { var items = playbackItems(), index = -1, i; if (!items.length) return; if (state.current) for (i = 0; i < items.length; i++) if (String(items[i].id) === String(state.current.id)) { index = i; break; } if (index < 0) index = direction > 0 ? -1 : items.length; play(items[(index + direction + items.length) % items.length]); }
   function selectTrack(song, position, duration, fromNative) {
+    stopLyricTicker(); stopLyricMotion();
     if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
     playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
     state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.lyricsWordLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
@@ -1064,7 +1131,7 @@
     playback.resolving = false; playback.needsSource = false; playback.sourceReady = false; playback.errorKind = ""; playback.errorCode = 0;
     setPlaybackStatus(playback.wantPlay ? "preparing" : "paused"); audio.src = "/media?url=" + encodeURIComponent(source); audio.load();
   }
-  function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), close; if (!overlay || state.playerOpen) return; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); close = document.getElementById("player-close"); if (close) close.focus(); }
+  function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), close; if (!overlay || state.playerOpen) return; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); syncLyricTicker(playbackPosition()); close = document.getElementById("player-close"); if (close) close.focus(); }
   function queuePopupMarkup(items) {
     var html = "", i, song, actions, favorite;
     for (i = 0; i < items.length; i++) {
@@ -1124,7 +1191,7 @@
   }
   function openQueuePopup() { var popup = document.getElementById("queue-popup"); if (!popup || state.queueOpen) return; state.queuePreviousFocus = document.activeElement; state.queueOpen = true; popup.hidden = false; syncCommentMotion(); renderQueuePopup(); }
   function closeQueuePopup() { var popup = document.getElementById("queue-popup"), previous = state.queuePreviousFocus, fallback; if (!popup) return; state.queueOpen = false; popup.hidden = true; queueLoading.token += 1; queueLoading.covers = 0; popup.removeAttribute("aria-busy"); state.queuePreviousFocus = null; fallback = document.getElementById(state.playerOpen ? "overlay-queue" : "queue-open"); if (isFocusable(previous) && previous.focus) previous.focus(); else if (fallback) fallback.focus(); syncCommentMotion(); }
-  function closePlayerOverlay() { var overlay = document.getElementById("player-overlay"), previous = state.playerPreviousFocus; if (!overlay) return; if (state.queueOpen) closeQueuePopup(); state.playerOpen = false; overlay.hidden = true; stopCommentMotion(); state.playerPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else focusInitial(); }
+  function closePlayerOverlay() { var overlay = document.getElementById("player-overlay"), previous = state.playerPreviousFocus; if (!overlay) return; if (state.queueOpen) closeQueuePopup(); state.playerOpen = false; overlay.hidden = true; stopCommentMotion(); stopLyricTicker(); stopLyricMotion(); state.playerPreviousFocus = null; if (previous && previous.focus && document.body.contains(previous)) previous.focus(); else focusInitial(); }
   function cyclePlayMode() { state.playMode = state.playMode === "list" ? "one" : (state.playMode === "one" ? "shuffle" : "list"); renderPlayMode(); if (state.playerOpen) renderPlayerOverlay(); savePlayback(); }
   function playRandom() { var items = playbackItems(), candidates = [], current = state.current, i; for (i = 0; i < items.length; i++) if (!current || String(items[i].id) !== String(current.id)) candidates.push(items[i]); if (!candidates.length) candidates = items; if (candidates.length) play(candidates[Math.floor(Math.random() * candidates.length)]); }
   function handleEnded() { if (state.playbackListSource === "queue" && !state.queue.some(function (song) { return sameSong(song, state.current); })) { playRelative(1); return; } if (state.playMode === "one") { audio.currentTime = 0; var replay = audio.play(); if (replay && replay.catch) replay.catch(function () {}); return; } if (state.playMode === "shuffle") { playRandom(); return; } playRelative(1); }
@@ -1306,12 +1373,12 @@
     openExitConfirm(); return true;
   }
   window.MingmingTVBack = handleBack;
-  window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); stopLyricMotion(); if (state.scan) closeScan(); };
-  window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); syncCommentMotion(); };
+  window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); stopLyricTicker(); stopLyricMotion(); if (state.scan) closeScan(); };
+  window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); syncCommentMotion(); };
   document.addEventListener("visibilitychange", function () { if (document.hidden) window.MingmingTVBackground(); else window.MingmingTVForeground(); });
   window.addEventListener("pageshow", window.MingmingTVForeground);
   window.addEventListener("resize", function () { refreshViewport(); syncCommentMotion(); updateLyrics(playbackPosition(), true); });
-  window.addEventListener("pagehide", function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); if (state.scan) { closeScan(); var xhr = new XMLHttpRequest(); xhr.open("POST", "/api/scan/cancel", false); try { xhr.send(); } catch (ignore) {} } });
+  window.addEventListener("pagehide", function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); stopLyricTicker(); stopLyricMotion(); if (state.scan) { closeScan(); var xhr = new XMLHttpRequest(); xhr.open("POST", "/api/scan/cancel", false); try { xhr.send(); } catch (ignore) {} } });
 
   function logout() {
     var message = document.getElementById("account-message"), button = document.getElementById("account-logout");
@@ -1352,11 +1419,13 @@
   function seekTo(time) {
     var duration = playbackDuration();
     if (!isFinite(time) || !duration) return;
+    stopLyricTicker(); stopLyricMotion();
     time = Math.max(0, Math.min(duration, time));
     playback.position = time;
     if (nativePlayer) { nativePlayer.command("seek", String(time)); playback.pendingSeek = null; }
     else if (playback.sourceReady) audio.currentTime = time; else playback.pendingSeek = time;
     syncProgress(time); updateLyrics(time, true); savePlayback();
+    if (state.playbackStatus === "playing") syncLyricTicker(time);
   }
   function finishSeek() {
     var input = state.seekInput, time;
@@ -1397,7 +1466,7 @@
     if (progressView.elapsed !== elapsed) { document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("overlay-elapsed").textContent = elapsed; progressView.elapsed = elapsed; }
     if (progressView.duration !== duration) { document.getElementById("player-duration").textContent = duration; document.getElementById("overlay-duration").textContent = duration; progressView.duration = duration; }
   }
-  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(status === "playing"); if (status !== "playing") stopLyricMotion(); if (changed) updateTrackStates(); if (status === "failed") { var label = document.getElementById("lyric-status"); if (label) { label.textContent = playbackErrorText(); label.hidden = false; } } syncCommentMotion(); }
+  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status, visualPlaying = (status === "playing" || status === "buffering" || status === "preparing") && playback.wantPlay; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(visualPlaying); if (status !== "playing") { stopLyricTicker(); if (changed) stopLyricMotion(); } else if (changed || lyricMotion.frame === null) syncLyricTicker(playbackPosition()); if (changed) updateTrackStates(); if (status === "failed") { var label = document.getElementById("lyric-status"); if (label) { label.textContent = playbackErrorText(); label.hidden = false; } } syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
   audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });
@@ -1413,7 +1482,7 @@
   });
   function mediaCanSeek() { if (!playback.sourceReady) return; applyPendingSeek(); if (playback.wantPlay && audio.paused) startAudio(); }
   audio.addEventListener("canplay", mediaCanSeek); audio.addEventListener("progress", mediaCanSeek);
-  audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(playbackPosition()); if (playback.sourceReady && !audio.paused && Date.now() - playbackWrite.lastSave >= 5000) savePlayback(); });
+  audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(playbackPosition()); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); if (playback.sourceReady && !audio.paused && Date.now() - playbackWrite.lastSave >= 5000) savePlayback(); });
   audio.addEventListener("ended", function () { setPlaybackStatus("ended"); handleEnded(); });
   if (nativePlayer) window.setInterval(function () { if (!commentMotion.background && !document.hidden) refreshNativePlayback(); }, 500);
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
