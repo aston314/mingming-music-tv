@@ -207,7 +207,6 @@ final class NativeMusicPlayer {
                 if (resolved == null || resolved.isEmpty()) {
                     errorKind = resolverNetworkFailure ? "network" : "resolver";
                     errorCode = 0;
-                    if (continueAfterFailure()) return;
                     wantPlay = false;
                     publish("failed");
                     checkpoint(null);
@@ -223,7 +222,6 @@ final class NativeMusicPlayer {
                     replacing = false;
                     errorKind = "player";
                     errorCode = 0;
-                    if (continueAfterFailure()) return;
                     wantPlay = false;
                     publish("failed");
                 }

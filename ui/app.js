@@ -1119,7 +1119,7 @@
     if (!song || playback.resolving) return;
     playback.resolving = true; playback.errorKind = ""; playback.errorCode = 0; setPlaybackStatus("preparing");
     directSource = song.audioPath || song.audioUrl || song.audio_url;
-    if (directSource) setAudioSource(directSource); else api("/api/music/url", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=" + encodeURIComponent(song.type || song.provider || "wy"), function (err, data) { var source = data && data.data, status; if (token !== state.playToken) return; playback.resolving = false; if (err || !source) { playback.errorKind = "resolver"; playback.errorCode = 0; if (continueAfterFailure()) return; playback.wantPlay = false; setPlaybackStatus("failed"); status = document.getElementById("lyric-status"); status.textContent = playbackErrorText(); status.hidden = false; return; } setAudioSource(source); });
+    if (directSource) setAudioSource(directSource); else api("/api/music/url", "POST", "id=" + encodeURIComponent(song.id || "") + "&type=" + encodeURIComponent(song.type || song.provider || "wy"), function (err, data) { var source = data && data.data, status; if (token !== state.playToken) return; playback.resolving = false; if (err || !source) { playback.errorKind = "resolver"; playback.errorCode = 0; playback.wantPlay = false; setPlaybackStatus("failed"); status = document.getElementById("lyric-status"); status.textContent = playbackErrorText(); status.hidden = false; return; } setAudioSource(source); });
   }
   function applyPendingSeek() {
     var target, i, seekable = false;
