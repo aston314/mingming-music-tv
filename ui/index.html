@@ -15,11 +15,9 @@
     </header>
     <div class="workspace">
       <aside class="sidebar" aria-label="音乐导航">
-        <div class="nav-heading">发现</div>
         <button id="nav-recommend" class="nav-item focusable is-active" data-page="recommend" data-focus="nav-recommend"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5M8 16h8"/></svg></span><span>歌单</span></button>
         <button class="nav-item focusable" data-page="search" data-focus="nav-search"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></span><span>搜索</span></button>
         <button class="nav-item focusable" data-page="playlists" data-focus="nav-playlists"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 20v-7h4v7M10 20V4h4v16M15 20v-11h4v11"/></svg></span><span>榜单</span></button>
-        <div class="nav-heading">个人</div>
         <button class="nav-item focusable" data-page="queue" data-focus="nav-queue"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h11M4 18h8m5-2 4 3-4 3Z"/></svg></span><span>播放列表</span><b id="queue-count">0</b></button>
         <button class="nav-item focusable" data-page="favorites" data-focus="nav-favorites"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.2 5.8a5 5 0 0 0-7.1 0L12 6.9l-1.1-1.1a5 5 0 0 0-7.1 7.1L12 21l8.2-8.1a5 5 0 0 0 0-7.1Z"/></svg></span><span>收藏</span></button>
         <button id="nav-account" class="nav-item focusable" data-page="account" data-focus="nav-account"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span><span>我的</span></button>
@@ -30,13 +28,13 @@
     <footer class="player-bar">
       <button id="now-playing" class="now-playing focusable" title="打开全屏播放器"><img id="player-cover" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI5NiIgaGVpZ2h0PSI5NiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMC41IiB5Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iI2Q2OWE1MCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzY4NDAyMSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxjaXJjbGUgY3g9IjQ4IiBjeT0iNDgiIHI9IjQ4IiBmaWxsPSJ1cmwoI2cpIi8+PC9zdmc+" alt=""><span class="now-playing-copy"><strong id="player-title">未在播放</strong><span id="player-artist">选择一首歌曲开始播放</span></span></button>
       <button id="play-mode" class="icon-button mode-button control-pill focusable" title="播放顺序：列表循环" aria-label="播放顺序：列表循环"></button>
+      <button id="queue-open" class="icon-button control-pill queue-button focusable" title="播放队列" aria-label="播放队列"></button>
       <div class="player-controls">
         <button id="prev" class="icon-button focusable" title="上一首" aria-label="上一首"></button>
         <button id="play" class="play-button focusable" title="播放" aria-label="播放"></button>
         <button id="next" class="icon-button focusable" title="下一首" aria-label="下一首"></button>
       </div>
       <div class="player-progress"><span id="player-elapsed">00:00</span><input id="seek" class="range focusable" type="range" min="0" max="100" step="0.1" value="0" aria-label="播放进度"><span id="player-duration">00:00</span></div>
-      <button id="queue-open" class="icon-button control-pill queue-button focusable" title="播放队列" aria-label="播放队列"></button>
     </footer>
   </div>
   <section id="player-overlay" class="player-overlay" hidden aria-label="全屏播放器">

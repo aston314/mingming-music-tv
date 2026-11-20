@@ -28,7 +28,9 @@ final class StartupView extends LinearLayout {
         setGravity(Gravity.CENTER);
         setBackgroundColor(Color.rgb(16, 23, 19));
         logo = new LogoRingView(context);
-        addView(logo, new LayoutParams(dp(148), dp(148)));
+        // Keep the logo block compact enough for a TV splash while reserving
+        // a clear breathing space between the mark and its readiness ring.
+        addView(logo, new LayoutParams(dp(128), dp(128)));
         TextView title = text("正在启动" + context.getString(R.string.app_name) + "...", 28, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LayoutParams titleParams = new LayoutParams(-2, -2);
@@ -102,9 +104,9 @@ final class StartupView extends LinearLayout {
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             float size = Math.min(getWidth(), getHeight()), cx = getWidth() / 2f, cy = getHeight() / 2f;
-            float radius = size * .46f;
+            float radius = size * .42f;
             ring.set(cx - radius, cy - radius, cx + radius, cy + radius);
-            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(size * .027f); paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(size * .022f); paint.setStrokeCap(Paint.Cap.ROUND);
             paint.setColor(Color.rgb(43, 61, 48)); canvas.drawOval(ring, paint);
             if (running) {
                 paint.setColor(Color.rgb(199, 243, 141));
@@ -112,7 +114,7 @@ final class StartupView extends LinearLayout {
                 canvas.drawArc(ring, phase * 360f - 90f, sweep, false, paint);
             }
             // Leave space between the square logo's corners and the round ring.
-            int half = Math.round(size * .28f);
+            int half = Math.round(size * .225f);
             drawable.setBounds(Math.round(cx) - half, Math.round(cy) - half, Math.round(cx) + half, Math.round(cy) + half);
             drawable.draw(canvas);
         }

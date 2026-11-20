@@ -97,10 +97,15 @@
 
   function each(root, selector, fn) { var nodes = root.querySelectorAll(selector), i; for (i = 0; i < nodes.length; i++) fn(nodes[i]); }
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>\"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+  function visibleText(value) {
+    var text = String(value == null ? "" : value);
+    if (state.page === "search") return text;
+    return text.replace(/网易云/g, "").replace(/\s{2,}/g, " ").replace(/^\s*[·|｜]\s*|\s*[·|｜]\s*$/g, "");
+  }
   function api(path, method, body, done) {
     var xhr = new XMLHttpRequest(), settled = false;
     function finish(err, data) { if (settled) return; settled = true; done(err, data); }
-    xhr.open(method || "GET", path, true); xhr.timeout = 18000;
+    xhr.open(method || "GET", path, true); xhr.timeout = 30000;
     if (body) xhr.setRequestHeader("Content-Type", body.charAt(0) === "{" ? "application/json; charset=UTF-8" : "application/x-www-form-urlencoded; charset=UTF-8");
     xhr.onreadystatechange = function () { var data; if (xhr.readyState !== 4) return; data = null; try { data = JSON.parse(xhr.responseText); } catch (ignore) {} if (xhr.status >= 200 && xhr.status < 300) finish(null, data); else finish(new Error((data && (data.message || data.msg)) || "请求失败"), data); };
     xhr.ontimeout = function () { finish(new Error("请求超时")); }; xhr.onerror = function () { finish(new Error("网络不可用")); }; xhr.send(body || null);
@@ -117,9 +122,9 @@
     return parts[0] + "?" + params.join("&") + hash;
   }
   function fullscreenCover(song) { return cover(song, 400); }
-  function songName(song) { return song && (song.name || song.title || song.mainTitle || "未命名歌曲"); }
-  function artist(song) { var names = song && (song.ar || song.artists); if (names && names.length) return names.map(function (x) { return typeof x === "string" ? x : x.name; }).join(" / "); return song && (song.artist || "未知歌手"); }
-  function album(song) { var value = song && (song.al || song.album); return (value && typeof value === "object" ? value.name : value) || "单曲"; }
+  function songName(song) { return visibleText(song && (song.name || song.title || song.mainTitle || "未命名歌曲")); }
+  function artist(song) { var names = song && (song.ar || song.artists); if (names && names.length) return visibleText(names.map(function (x) { return typeof x === "string" ? x : x.name; }).join(" / ")); return visibleText(song && (song.artist || "未知歌手")); }
+  function album(song) { var value = song && (song.al || song.album); return visibleText((value && typeof value === "object" ? value.name : value) || "单曲"); }
   function pageTitle(title, sub) { return '<div class="page-title"><h1>' + esc(title) + '</h1>' + (sub ? '<p>' + esc(sub) + '</p>' : '') + '</div>'; }
   function renderState(message, error) { content.innerHTML = '<div class="state' + (error ? ' error' : '') + '">' + esc(message) + '</div>'; }
 
@@ -310,14 +315,15 @@
   }
   function playerFocusKey(code, active) {
     if (code !== 37 && code !== 38 && code !== 39 && code !== 40 && active.id !== "seek" && active.id !== "overlay-seek") return false;
-    var ids = state.playerOpen ? ["player-repeat", "overlay-prev", "overlay-play", "overlay-next", "overlay-queue"] : ["now-playing", "play-mode", "prev", "play", "next", "queue-open"], index = ids.indexOf(active.id), target, comments = document.getElementById("overlay-comments"), toggle = document.getElementById("player-comments-toggle"), comment = state.playerOpen ? parentMatch(active, ".comment", comments) : null, commentEntry = state.playerOpen ? (state.commentsHidden ? toggle : firstFocusable(comments) || comments) : null, nodes, next;
+    var ids = state.playerOpen ? ["player-repeat", "overlay-prev", "overlay-play", "overlay-next", "overlay-queue"] : ["now-playing", "play-mode", "queue-open", "prev", "play", "next"], index = ids.indexOf(active.id), target, comments = document.getElementById("overlay-comments"), toggle = document.getElementById("player-comments-toggle"), comment = state.playerOpen ? parentMatch(active, ".comment", comments) : null, commentEntry = state.playerOpen ? (state.commentsHidden ? toggle : firstFocusable(comments) || comments) : null, nodes, next;
     if (active.id === "seek" || active.id === "overlay-seek") {
       if (code === 37 || code === 39) { seekTo(playbackPosition() + (code === 39 ? 5 : -5)); return true; }
       if (code === 13 || code === 23 || code === 66) return true;
       target = code === 40 ? document.getElementById(state.playerOpen ? "overlay-play" : "play") : (state.playerOpen ? document.getElementById("overlay-favorite") : resolveBookmark(content, focusMemory.footerReturn) || contentEntry());
     } else if (index >= 0) {
       if (code === 37 || code === 39) {
-        if (state.playerOpen && code === 39 && index === ids.length - 1) target = commentEntry;
+        if (!state.playerOpen && code === 39 && active.id === "next") target = document.getElementById("seek");
+        else if (state.playerOpen && code === 39 && index === ids.length - 1) target = commentEntry;
         else target = document.getElementById(ids[Math.max(0, Math.min(ids.length - 1, index + (code === 39 ? 1 : -1)))]);
       } else if (code === 38) target = active.id === "now-playing" ? resolveBookmark(content, focusMemory.footerReturn) || contentEntry() : document.getElementById(state.playerOpen ? "overlay-seek" : "seek");
       else if (code === 40) target = active;
@@ -411,7 +417,7 @@
     return '<div class="track-row focusable' + (queueView ? ' queue-popup-item' : '') + (current ? ' is-current' : '') + '" role="button" tabindex="0" data-song="' + index + '" data-track-id="' + esc(song.id) + '" aria-label="播放 ' + esc(songName(song)) + '">' + (queueView ? '<span class="queue-popup-index">' + (index + 1) + '</span>' : '') + '<img data-cover-song="' + index + '" src="' + esc(cover(song)) + '" alt=""><div class="track-info"><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></div><span class="track-playing" aria-label="当前歌曲"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="equalizer-bar equalizer-bar-one" d="M5 12v8"/><path class="equalizer-bar equalizer-bar-two" d="M12 4v16"/><path class="equalizer-bar equalizer-bar-three" d="M19 8v12"/></svg></span><div class="track-actions">' + actions + '</div>' + (queueView ? '' : '<span class="track-duration">' + songDuration(song) + '</span>') + '</div>';
   }
   function card(song, index) { return '<button class="music-card focusable" data-song="' + index + '"><span class="poster-cover"><img data-cover-song="' + index + '" src="' + esc(cover(song, 300)) + '" alt=""></span><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></button>'; }
-  function playlistCard(playlist) { var id = playlist.id || playlist.playlistId || "", title = playlist.name || playlist.title || "精选歌单", creator = playlist.creator && playlist.creator.nickname || "网易云"; return '<button class="playlist-card focusable" data-playlist-id="' + esc(id) + '" data-playlist-name="' + esc(title) + '"><div class="playlist-cover"><img src="' + esc(sizedArtwork(playlist.coverImgUrl || playlist.cover || "https://picsum.photos/seed/playlist/360/360", 300)) + '" alt=""><span>网易云</span></div><strong>' + esc(title) + '</strong><small>' + esc(creator) + ' · ' + esc(playlist.trackCount || 0) + ' 首</small></button>'; }
+  function playlistCard(playlist) { var id = playlist.id || playlist.playlistId || "", title = visibleText(playlist.name || playlist.title || "精选歌单"), creator = visibleText(playlist.creator && playlist.creator.nickname || ""), detail = creator ? creator + " · " : ""; return '<button class="playlist-card focusable" data-playlist-id="' + esc(id) + '" data-playlist-name="' + esc(title) + '"><div class="playlist-cover"><img src="' + esc(sizedArtwork(playlist.coverImgUrl || playlist.cover || "https://picsum.photos/seed/playlist/360/360", 300)) + '" alt=""></div><strong>' + esc(title) + '</strong><small>' + esc(detail + (playlist.trackCount || 0) + ' 首') + '</small></button>'; }
   function rankingDefinitions() { return [
     {id: "3778678", name: "热歌榜", trackCount: 200},
     {id: "3779629", name: "新歌榜", trackCount: 100},
@@ -518,12 +524,24 @@
   function doSearch(q, append) { var box, provider, page, request, query = String(q || "").replace(/^\s+|\s+$/g, ""); if (!query) return; box = document.getElementById("search-results"); provider = state.searchProvider || "wy"; if (!box || (append && state.searchLoading) || (append && (!state.searchMore || query !== state.searchQuery))) return; if (!append) { state.searchQuery = query; state.searchPage = 0; state.searchMore = true; state.songs = []; state.searchRequest += 1; rememberSearch(query); box.innerHTML = '<div class="state">正在搜索…</div>'; } page = append ? state.searchPage + 1 : 1; request = state.searchRequest; state.searchLoading = true; if (append) { var moreBox = document.getElementById("search-more"); if (moreBox) moreBox.textContent = "正在加载更多…"; } api("/api/music/search", "POST", "name=" + encodeURIComponent(query) + "&type=" + encodeURIComponent(provider) + "&page=" + page + "&limit=" + state.searchPageSize + "&format=1", function (err, data) { var items; if (request !== state.searchRequest || state.page !== "search") return; state.searchLoading = false; if (err) { state.searchMore = !!append; if (!append) renderSearchResults(box, err.message); else { var errorBox = document.getElementById("search-more"); if (errorBox) errorBox.textContent = "加载更多失败，请继续下滚重试"; } return; } items = searchItems(data); state.songs = mergeSearchItems(items, append); state.searchPage = page; state.searchMore = searchMoreFlag(data, items); renderSearchResults(box); }); }
   function extractTracks(data) { var payload = data && data.data || data || {}; if (payload.playlist && payload.playlist.tracks) return payload.playlist.tracks; if (payload.tracks) return payload.tracks; return []; }
   function loadPlaylistDetail(id, name, backPage) {
-    var origin = document.activeElement, request = {page: backPage || "recommend", id: id}; state.detailReturn = request; focusMemory.content[state.page] = null; content.scrollTop = 0;
-    content.innerHTML = pageTitle(name || "歌单", "网易云 · 歌曲列表") + '<div id="playlist-detail-body" class="track-list"><div class="state">正在加载歌曲…</div></div>';
-    api("/api/music/list", "POST", "id=" + encodeURIComponent(id) + "&type=wy", function (err, data) {
-      var box = document.getElementById("playlist-detail-body"); if (!box || state.detailReturn !== request) return;
-      state.songs = extractTracks(data); box.innerHTML = err ? '<div class="state error">' + esc(err.message) + '</div>' : (state.songs.length ? state.songs.map(track).join("") : '<div class="empty">暂无歌曲</div>'); bindSongActions(box); var first = box.querySelector(".track-row"); if (first && focusRoot() === document && (document.activeElement === document.body || document.activeElement === origin)) focusTarget(first);
-    });
+    var origin = document.activeElement, request = {page: backPage || "recommend", id: id, attempt: 0}; state.detailReturn = request; focusMemory.content[state.page] = null; content.scrollTop = 0;
+    content.innerHTML = pageTitle(name || "歌单", "歌曲列表") + '<div id="playlist-detail-body" class="track-list"><div class="state">正在加载歌曲…</div></div>';
+    function fetch(attempt) {
+      var box = document.getElementById("playlist-detail-body");
+      if (!box || state.detailReturn !== request) return;
+      request.attempt = attempt;
+      box.innerHTML = '<div class="state">' + (attempt ? '正在重试加载歌曲…' : '正在加载歌曲…') + '</div>';
+      api("/api/music/list", "POST", "id=" + encodeURIComponent(id) + "&type=wy", function (err, data) {
+        var first;
+        if (state.detailReturn !== request || request.attempt !== attempt) return;
+        if (err && attempt === 0) { fetch(1); return; }
+        box = document.getElementById("playlist-detail-body"); if (!box) return;
+        state.songs = extractTracks(data); box.innerHTML = err ? '<div class="state error">' + esc(err.message) + '<button id="playlist-detail-retry" class="link-button focusable" type="button">重试</button></div>' : (state.songs.length ? state.songs.map(track).join("") : '<div class="empty">暂无歌曲</div>'); bindSongActions(box);
+        if (err) { document.getElementById("playlist-detail-retry").addEventListener("click", function () { fetch(0); }); return; }
+        first = box.querySelector(".track-row"); if (first && focusRoot() === document && (document.activeElement === document.body || document.activeElement === origin)) focusTarget(first);
+      });
+    }
+    fetch(0);
   }
 
   function firstArtist(song) { var list = song && (song.ar || song.artists), item; if (list && list.length) { item = list[0]; return typeof item === "string" ? {name: item} : item; } return {name: artist(song)}; }
@@ -665,8 +683,8 @@
   }
 
   function renderRankingCards(items) { var savedFocus = bookmark(content), box = document.getElementById("playlist-body"); if (!box) return; box.innerHTML = items.map(playlistCard).join(""); bindPlaylistActions(box, "playlists"); restoreBookmark(content, savedFocus); }
-  function loadRanking() { var requestBox = document.getElementById("playlist-body"), definitions = rankingDefinitions(), pending = definitions.length, i; renderRankingCards(definitions); for (i = 0; i < definitions.length; i++) (function (index) { api("/api/music/list", "POST", "id=" + encodeURIComponent(definitions[index].id) + "&type=wy", function (err, data) { var playlist = data && data.data && data.data.playlist; if (!err && playlist) { definitions[index] = {id: String(playlist.id || definitions[index].id), name: playlist.name || definitions[index].name, coverImgUrl: playlist.coverImgUrl || "", trackCount: playlist.trackCount || definitions[index].trackCount, creator: {nickname: "网易云"}}; } pending -= 1; if (!pending && state.page === "playlists" && !state.detailReturn && requestBox === document.getElementById("playlist-body")) renderRankingCards(definitions); }); }(i)); }
-  function renderPlaylists() { content.innerHTML = pageTitle("排行榜", "网易云官方榜单") + '<div id="playlist-body" class="playlist-grid"><div class="state">正在加载排行榜…</div></div>'; loadRanking(); }
+  function loadRanking() { var requestBox = document.getElementById("playlist-body"), definitions = rankingDefinitions(), pending = definitions.length, i; renderRankingCards(definitions); for (i = 0; i < definitions.length; i++) (function (index) { api("/api/music/list", "POST", "id=" + encodeURIComponent(definitions[index].id) + "&type=wy", function (err, data) { var playlist = data && data.data && data.data.playlist; if (!err && playlist) { definitions[index] = {id: String(playlist.id || definitions[index].id), name: playlist.name || definitions[index].name, coverImgUrl: playlist.coverImgUrl || "", trackCount: playlist.trackCount || definitions[index].trackCount, creator: {nickname: ""}}; } pending -= 1; if (!pending && state.page === "playlists" && !state.detailReturn && requestBox === document.getElementById("playlist-body")) renderRankingCards(definitions); }); }(i)); }
+  function renderPlaylists() { content.innerHTML = pageTitle("排行榜", "官方榜单") + '<div id="playlist-body" class="playlist-grid"><div class="state">正在加载排行榜…</div></div>'; loadRanking(); }
   function renderInspiration() { content.innerHTML = pageTitle("灵感音乐", "来自音乐广场的声音") + '<div id="inspiration-body" class="card-grid"><div class="state">正在加载灵感音乐…</div></div>'; api("/api/aimusic/square?limit=50", "GET", null, function (err, data) { state.songs = data && (data.list || data.data || data.items || []) || []; var box = document.getElementById("inspiration-body"); box.innerHTML = err ? '<div class="state error">' + esc(err.message) + '</div>' : (state.songs.length ? state.songs.map(card).join("") : '<div class="empty">暂无灵感音乐</div>'); bindSongActions(box); }); }
   function queueTabs(active) { return '<div class="library-tabs"><button class="tab focusable' + (active === "queue" ? ' is-active' : '') + '" data-library-tab="queue">播放列表 <b>' + state.queue.length + '</b></button><button class="tab focusable' + (active === "recent" ? ' is-active' : '') + '" data-library-tab="recent">最近播放 <b>' + state.recent.length + '</b></button></div>'; }
   function recentHero() { var song = state.current || state.recent[0], favorite = isFavorite(song); if (!song) return '<div class="recent-hero empty-recent"><span>还没有最近播放的歌曲</span></div>'; return '<div id="recent-current-track" class="recent-hero track-row focusable" role="button" tabindex="0" data-track-id="' + esc(song.id) + '" aria-label="播放 ' + esc(songName(song)) + '"><img data-current-cover src="' + esc(cover(song)) + '" alt=""><div class="recent-hero-info"><span class="eyebrow">最近在播放</span><strong>' + esc(songName(song)) + '</strong><span>' + esc(artist(song)) + '</span></div><div class="track-actions">' + queueTrackAction(song) + trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite) + '</div></div>'; }
