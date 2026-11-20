@@ -55,7 +55,7 @@ final class NativeMusicPlayer {
     private int errorCode;
     private double position, duration;
     private long generation, sequence, lastSave, selectionTag;
-    private int sourceRetryCount;
+    private int sourceRetryCount, autoSkipCount;
     private boolean ready, resolving, wantPlay, replacing, released, foreground, exiting;
     private volatile String published = "{}";
 
@@ -87,7 +87,8 @@ final class NativeMusicPlayer {
                     errorCode = 0;
                 }
                 if (value.getPlaybackState() == Player.STATE_ENDED && wantPlay) {
-                    position = duration; publish("ended"); next(1, true); return;
+                    autoSkipCount = 0;
+                    position = duration; publish("ended"); next(1, true, true); return;
                 }
                 if (!resolving && value.getMediaItemCount() > 0) wantPlay = value.getPlayWhenReady();
                 refresh();
@@ -108,6 +109,7 @@ final class NativeMusicPlayer {
                     } }, 350);
                     return;
                 }
+                if (continueAfterFailure()) return;
                 wantPlay = false;
                 publish("failed"); checkpoint(null);
             }
@@ -129,7 +131,7 @@ final class NativeMusicPlayer {
     void command(String operation, String payload) {
         if (released || exiting) return;
         try {
-            if ("select".equals(operation)) select(new JSONObject(payload));
+            if ("select".equals(operation)) select(new JSONObject(payload), true);
             else if ("configure".equals(operation)) configure(new JSONObject(payload));
             else if ("play".equals(operation)) play();
             else if ("pause".equals(operation)) pause();
@@ -139,7 +141,7 @@ final class NativeMusicPlayer {
             else if ("save".equals(operation)) checkpoint(null);
         } catch (Exception ignored) { /* malformed bridge commands never replace valid state */ }
     }
-    private void select(JSONObject value) throws Exception {
+    private void select(JSONObject value, boolean resetAutoSkip) throws Exception {
         JSONObject selected = value.getJSONObject("track");
         if (selected.optString("id").isEmpty()) return;
         generation++; replacing = true; wantPlay = false; resolving = false; ready = false;
@@ -148,6 +150,7 @@ final class NativeMusicPlayer {
         errorKind = "";
         errorCode = 0;
         sourceRetryCount = 0;
+        if (resetAutoSkip) autoSkipCount = 0;
         selectionTag = value.optLong("selectionTag", 0);
         list = value.optJSONArray("list") == null ? new JSONArray() : value.getJSONArray("list");
         mode = value.optString("mode", "list"); listSource = value.optString("listSource", "");
@@ -204,6 +207,7 @@ final class NativeMusicPlayer {
                 if (resolved == null || resolved.isEmpty()) {
                     errorKind = resolverNetworkFailure ? "network" : "resolver";
                     errorCode = 0;
+                    if (continueAfterFailure()) return;
                     wantPlay = false;
                     publish("failed");
                     checkpoint(null);
@@ -219,6 +223,7 @@ final class NativeMusicPlayer {
                     replacing = false;
                     errorKind = "player";
                     errorCode = 0;
+                    if (continueAfterFailure()) return;
                     wantPlay = false;
                     publish("failed");
                 }
@@ -226,7 +231,7 @@ final class NativeMusicPlayer {
         } });
     }
     private void pause() {
-        wantPlay = false; player.pause(); capture(); publish("paused"); checkpoint(null);
+        autoSkipCount = 0; wantPlay = false; player.pause(); capture(); publish("paused"); checkpoint(null);
     }
     private void seek(double seconds) {
         if (Double.isNaN(seconds) || Double.isInfinite(seconds)) return;
@@ -234,7 +239,9 @@ final class NativeMusicPlayer {
         if (player.getMediaItemCount() > 0) player.seekTo((long) (position * 1000));
         refresh(); checkpoint(null);
     }
-    private void next(int direction, boolean ended) {
+    private void next(int direction, boolean ended) { next(direction, ended, false); }
+    private void next(int direction, boolean ended, boolean automatic) {
+        if (!automatic) autoSkipCount = 0;
         ArrayList<String> ids = new ArrayList<>();
         for (int i = 0; i < list.length(); i++) ids.add(list.optJSONObject(i) == null ? "" : list.optJSONObject(i).optString("id"));
         int index = PlaybackQueue.next(ids, track == null ? "" : track.optString("id"), mode, direction, ended, random);
@@ -243,8 +250,14 @@ final class NativeMusicPlayer {
             JSONObject selected = list.getJSONObject(index);
             JSONObject value = snapshot(); value.put("track", selected).put("position", 0)
                     .put("duration", selected.optDouble("dt", 0) / 1000);
-            select(value); play();
+            select(value, !automatic); play();
         } catch (Exception ignored) { pause(); }
+    }
+    private boolean continueAfterFailure() {
+        if (!wantPlay || "one".equals(mode) || list.length() < 2 || autoSkipCount >= list.length()) return false;
+        autoSkipCount++;
+        next(1, true, true);
+        return true;
     }
     private void capture() {
         if (ready) {
