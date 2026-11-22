@@ -54,7 +54,7 @@ final class MingmingAppUpdater {
             code = json.getInt("version_code"); minSdk = json.getInt("min_sdk"); bytes = json.getLong("size");
             name = json.getString("version_name"); packageName = json.getString("package_name"); sha256 = json.getString("sha256").toLowerCase(Locale.ROOT);
             url = json.getString("download_url"); notes = json.optString("release_notes", "");
-            if (!BuildConfig.APPLICATION_ID.equals(packageName) || code <= BuildConfig.VERSION_CODE || minSdk < 23 || minSdk > Build.VERSION.SDK_INT
+            if (!BuildConfig.APPLICATION_ID.equals(packageName) || code <= 0 || minSdk < 23 || minSdk > Build.VERSION.SDK_INT
                     || bytes <= 0 || bytes > MAX_APK_BYTES || !sha256.matches("[a-f0-9]{64}")
                     || !name.matches("[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?")) throw new IOException("版本信息不完整或不匹配");
             String expected = "https://github.com/aston314/mingming-music-tv/releases/download/v" + name + "/mingming-music-tv-" + name + ".apk";
@@ -82,7 +82,11 @@ final class MingmingAppUpdater {
                 if (!valid(epoch)) return; checking = false;
                 if (result == null) { state = "error"; message = "检查失败：" + failure; publish(); return; }
                 latest = result; preferences.edit().putString("manifest", result.name).apply();
-                state = "available"; message = "发现新版本 " + result.name; publish(); if (manual) showUpdatePrompt(result);
+                if (result.code > BuildConfig.VERSION_CODE) {
+                    state = "available"; message = "发现新版本 " + result.name; publish(); if (manual) showUpdatePrompt(result);
+                } else {
+                    state = "latest"; message = "已是最新版本"; publish();
+                }
             } });
         } });
     }
