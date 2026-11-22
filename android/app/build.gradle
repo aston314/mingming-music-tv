@@ -13,6 +13,7 @@ android {
         versionName product.versionName
         resValue "string", "app_name", product.displayName
         buildConfigField "String", "CORE_VERSION", "\"${System.getenv('MINGMING_CORE_VERSION') ?: product.versionName + '-dev'}\""
+        buildConfigField "String", "UPDATE_ENDPOINT", "\"${product.updateEndpoint ?: ''}\""
         ndk { abiFilters.addAll(product.abis) }
     }
     buildFeatures { buildConfig true }

@@ -34,6 +34,8 @@ public final class MainActivity extends Activity {
     private Thread startupWorker;
     private FrameLayout root;
     private StartupView startup;
+    private MingmingAppUpdater appUpdater;
+    private boolean activityForeground;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -102,6 +104,12 @@ public final class MainActivity extends Activity {
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
         web.addJavascriptInterface(new MusicBridge(), "MingmingNativePlayer");
         web.addJavascriptInterface(new AppBridge(), "MingmingTVApp");
+        appUpdater = new MingmingAppUpdater(this, new MingmingAppUpdater.Host() {
+            @Override public boolean trusted() { return ready && !destroyed; }
+            @Override public boolean foreground() { return activityForeground && !isFinishing(); }
+            @Override public void restoreFocus() { if (!destroyed && web != null) { web.requestFocus(); immersive(); } }
+        });
+        web.addJavascriptInterface(appUpdater.new Bridge(), "MingmingTVUpdates");
         web.setWebViewClient(new WebViewClient() {
             private boolean failed;
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) { return !url.startsWith(endpoint.url); }
@@ -110,7 +118,7 @@ public final class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 if (failed || destroyed || page != web || generation != startupGeneration) return;
-                ready = true; startup.pauseAnimation(); startup.setVisibility(View.GONE); view.requestFocus(); immersive();
+                ready = true; startup.pauseAnimation(); startup.setVisibility(View.GONE); view.requestFocus(); immersive(); if (appUpdater != null) appUpdater.start();
             }
         });
         root.addView(web, 0, new FrameLayout.LayoutParams(-1, -1));
@@ -147,10 +155,10 @@ public final class MainActivity extends Activity {
             } });
         }
     }
-    @Override protected void onResume() { super.onResume(); immersive(); if (startup != null) startup.resumeAnimation(); if (web != null) { web.onResume(); web.evaluateJavascript("window.MingmingTVForeground&&window.MingmingTVForeground()", null); } }
     @Override public void onBackPressed() {
         if (destroyed || explicitExit || backPending) return;
         if (exitDialog != null) { exitDialog.cancel(); return; }
+        if (appUpdater != null && appUpdater.back()) return;
         if (!ready || web == null) { showExitConfirmation(); return; }
         backPending = true;
         web.evaluateJavascript("window.MingmingTVBack?window.MingmingTVBack():false", new ValueCallback<String>() {
@@ -196,6 +204,7 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) {} finally { if (connection != null) connection.disconnect(); }
         } }, "mingming-phone-cancel").start();
     }
-    @Override protected void onPause() { cancelPhoneInput(); CoreService.backgroundPlayback(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.evaluateJavascript("window.MingmingTVBackground&&window.MingmingTVBackground()", null); web.onPause(); } super.onPause(); }
-    @Override protected void onDestroy() { destroyed = true; startupGeneration++; if (startupWorker != null) startupWorker.interrupt(); handler.removeCallbacksAndMessages(null); if (exitDialog != null) exitDialog.dismiss(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.destroy(); web = null; } if (explicitExit) CoreService.exitPlayback(); super.onDestroy(); }
+    @Override protected void onResume() { super.onResume(); activityForeground = true; immersive(); if (startup != null) startup.resumeAnimation(); if (appUpdater != null) appUpdater.resume(); if (web != null) { web.onResume(); web.evaluateJavascript("window.MingmingTVForeground&&window.MingmingTVForeground()", null); } }
+    @Override protected void onPause() { activityForeground = false; cancelPhoneInput(); CoreService.backgroundPlayback(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.evaluateJavascript("window.MingmingTVBackground&&window.MingmingTVBackground()", null); web.onPause(); } super.onPause(); }
+    @Override protected void onDestroy() { destroyed = true; activityForeground = false; if (appUpdater != null) appUpdater.destroy(); startupGeneration++; if (startupWorker != null) startupWorker.interrupt(); handler.removeCallbacksAndMessages(null); if (exitDialog != null) exitDialog.dismiss(); if (startup != null) startup.pauseAnimation(); if (web != null) { web.destroy(); web = null; } if (explicitExit) CoreService.exitPlayback(); super.onDestroy(); }
 }

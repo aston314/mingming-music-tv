@@ -84,7 +84,7 @@
   var content = document.getElementById("content"), audio = document.getElementById("audio");
   var nativePlayer = window.MingmingNativePlayer && window.MingmingNativePlayer.command && window.MingmingNativePlayer.read ? window.MingmingNativePlayer : null;
   var nativeApp = !!(window.MingmingTVApp || nativePlayer);
-  var nativeSelection = 0, nativePendingSelection = 0;
+  var nativeSelection = 0, nativePendingSelection = 0, settingsUpdateTimer = null;
   var commentMotion = {frame: null, last: 0, position: 0, scroll: 0, background: false, holdUntil: 0};
   var lyricMotion = {frame: null, base: 0, at: 0, wordTime: -1};
   var commentView = {token: -1, count: 0};
@@ -716,6 +716,49 @@
   function renderQueue() { var savedFocus = bookmark(content); state.page = "queue"; state.libraryView = "queue"; content.innerHTML = pageTitle("播放列表", state.queue.length + " 首歌曲") + queueTabs("queue") + recentHero() + (state.queue.length ? '<div class="track-list">' + state.queue.map(track).join("") + '</div>' : '<div class="empty">播放列表还是空的</div>'); bindLibraryTabs(); bindRecentHero(); bindSongActions(content, state.queue);  restoreBookmark(content, savedFocus); }
   function renderRecent() { var savedFocus = bookmark(content); state.page = "queue"; state.libraryView = "recent"; content.innerHTML = pageTitle("最近播放", state.recent.length + " 首歌曲") + queueTabs("recent") + recentHero() + (state.recent.length ? '<div class="track-list">' + state.recent.map(track).join("") + '</div>' : '<div class="empty">还没有最近播放记录</div>'); bindLibraryTabs(); bindRecentHero(); bindSongActions(content, state.recent);  restoreBookmark(content, savedFocus); }
   function renderFavorites() { var savedFocus = bookmark(content); content.innerHTML = pageTitle("我的收藏", state.favorites.length + " 首歌曲") + (state.favorites.length ? '<div class="track-list">' + state.favorites.map(track).join("") + '</div>' : '<div class="empty">' + (state.authenticated ? '暂无收藏，点击歌曲旁的爱心即可收藏' : '登录后收藏喜欢的音乐') + '</div>'); bindSongActions(content, state.favorites);  restoreBookmark(content, savedFocus); }
+  function readPreference(key, fallback) { try { var value = window.localStorage.getItem(key); return value == null ? fallback : value; } catch (ignore) { return fallback; } }
+  function writePreference(key, value) { try { window.localStorage.setItem(key, value); } catch (ignore) {} }
+  function applySidebarMode(mode) {
+    var app = document.getElementById("app"), icons = mode === "icons";
+    if (app) app.classList.toggle("sidebar-icons-only", icons);
+    writePreference("mingming.sidebarMode", icons ? "icons" : "expanded");
+  }
+  function applyTextScale(mode) { var app = document.getElementById("app"), large = mode === "large"; if (app) app.classList.toggle("text-scale-large", large); writePreference("mingming.textScale", large ? "large" : "standard"); }
+  function applyMotionMode(mode) { var app = document.getElementById("app"), reduced = mode === "reduced"; if (app) app.classList.toggle("reduced-motion", reduced); writePreference("mingming.motion", reduced ? "reduced" : "normal"); }
+  function renderUpdateStatus(data) {
+    var current = document.getElementById("settings-current-version"), status = document.getElementById("settings-update-state"), button = document.getElementById("settings-check-update"), parsed = data;
+    if (!current || !status || !button) return;
+    if (typeof parsed === "string") { try { parsed = JSON.parse(parsed); } catch (ignore) { parsed = null; } }
+    parsed = parsed || {};
+    current.textContent = parsed.current_version || "v" + "0.1.23";
+    status.textContent = parsed.message || (parsed.state === "browser" ? "浏览器预览不支持安装更新" : "启动后每天自动检查一次，播放时不打扰。");
+    button.disabled = parsed.state === "checking" || parsed.state === "downloading";
+    button.textContent = parsed.state === "checking" ? "检查中…" : parsed.state === "downloading" ? "下载中…" : parsed.state === "available" ? "查看更新 " + (parsed.latest_version || "") : "检查更新";
+  }
+  function pollUpdateStatus() {
+    var bridge = window.MingmingTVUpdates;
+    if (!bridge || !bridge.getStatus) { renderUpdateStatus({state: "browser", current_version: "v0.1.23"}); return; }
+    renderUpdateStatus(bridge.getStatus());
+    window.clearInterval(settingsUpdateTimer);
+    settingsUpdateTimer = window.setInterval(function () {
+      if (state.page !== "settings") { window.clearInterval(settingsUpdateTimer); settingsUpdateTimer = null; return; }
+      renderUpdateStatus(bridge.getStatus());
+    }, 500);
+  }
+  function renderSettings() {
+    var savedFocus = bookmark(content), sidebarMode = readPreference("mingming.sidebarMode", "expanded"), textScale = readPreference("mingming.textScale", "standard"), motion = readPreference("mingming.motion", "normal"), showComments = readPreference("mingming.commentDefault", "show") !== "hide";
+    applySidebarMode(sidebarMode); applyTextScale(textScale); applyMotionMode(motion);
+    content.innerHTML = pageTitle("设置", "明明音乐") + '<div class="settings-page"><section class="settings-card"><h2>界面设置</h2><p>选择电视端的导航、文字和动画显示方式。</p><h3>侧边栏显示</h3><div class="settings-actions"><button id="settings-sidebar-expanded" class="account-action account-secondary focusable" type="button" aria-pressed="' + (sidebarMode !== "icons" ? "true" : "false") + '">展开显示</button><button id="settings-sidebar-icons" class="account-action account-secondary focusable" type="button" aria-pressed="' + (sidebarMode === "icons" ? "true" : "false") + '">仅显示图标</button></div><p id="settings-sidebar-state" class="settings-state">当前：' + (sidebarMode === "icons" ? "仅显示图标" : "展开显示") + '</p><h3>字体大小</h3><div class="settings-actions"><button id="settings-text-standard" class="account-action account-secondary focusable" type="button" aria-pressed="' + (textScale !== "large" ? "true" : "false") + '">标准</button><button id="settings-text-large" class="account-action account-secondary focusable" type="button" aria-pressed="' + (textScale === "large" ? "true" : "false") + '">大字</button></div><p id="settings-text-state" class="settings-state">当前：' + (textScale === "large" ? "大字" : "标准") + '</p><h3>动画效果</h3><div class="settings-actions"><button id="settings-motion-normal" class="account-action account-secondary focusable" type="button" aria-pressed="' + (motion !== "reduced" ? "true" : "false") + '">正常</button><button id="settings-motion-reduced" class="account-action account-secondary focusable" type="button" aria-pressed="' + (motion === "reduced" ? "true" : "false") + '">减少动画</button></div><p id="settings-motion-state" class="settings-state">当前：' + (motion === "reduced" ? "减少动画" : "正常") + '</p></section><section class="settings-card"><h2>播放器设置</h2><p>全屏播放时是否默认显示评论区域。播放顺序、连续播放和记忆播放属于标准行为。</p><button id="settings-comments-default" class="account-action account-secondary focusable" type="button" aria-pressed="' + (showComments ? "true" : "false") + '">' + (showComments ? "默认显示评论" : "默认隐藏评论") + '</button><p id="settings-comments-state" class="settings-state">当前：' + (showComments ? "进入全屏时显示评论" : "进入全屏时隐藏评论") + '</p></section><section class="settings-card"><h2>版本更新</h2><p>当前版本 <strong id="settings-current-version">读取中…</strong></p><p id="settings-update-state" class="settings-state" role="status" aria-live="polite">启动后每天自动检查一次，播放时不打扰。</p><button id="settings-check-update" class="account-action account-primary focusable" type="button">检查更新</button></section></div>';
+    document.getElementById("settings-sidebar-expanded").addEventListener("click", function () { applySidebarMode("expanded"); renderSettings(); focusTarget(document.getElementById("settings-sidebar-expanded")); });
+    document.getElementById("settings-sidebar-icons").addEventListener("click", function () { applySidebarMode("icons"); renderSettings(); focusTarget(document.getElementById("settings-sidebar-icons")); });
+    document.getElementById("settings-text-standard").addEventListener("click", function () { applyTextScale("standard"); renderSettings(); focusTarget(document.getElementById("settings-text-standard")); });
+    document.getElementById("settings-text-large").addEventListener("click", function () { applyTextScale("large"); renderSettings(); focusTarget(document.getElementById("settings-text-large")); });
+    document.getElementById("settings-motion-normal").addEventListener("click", function () { applyMotionMode("normal"); renderSettings(); focusTarget(document.getElementById("settings-motion-normal")); });
+    document.getElementById("settings-motion-reduced").addEventListener("click", function () { applyMotionMode("reduced"); renderSettings(); focusTarget(document.getElementById("settings-motion-reduced")); });
+    document.getElementById("settings-comments-default").addEventListener("click", function () { var enabled = readPreference("mingming.commentDefault", "show") === "hide"; writePreference("mingming.commentDefault", enabled ? "show" : "hide"); state.commentsHidden = !enabled; renderSettings(); focusTarget(document.getElementById("settings-comments-default")); });
+    document.getElementById("settings-check-update").addEventListener("click", function () { var bridge = window.MingmingTVUpdates; if (!bridge || !bridge.check) { renderUpdateStatus({state: "browser", current_version: "v0.1.23"}); return; } bridge.check(); pollUpdateStatus(); });
+    pollUpdateStatus(); restoreBookmark(content, savedFocus);
+  }
   function renderAccount() { var savedFocus = bookmark(content); var loggedIn = state.authenticated, html = pageTitle("我的", "账号与同步") + '<section class="account-page"><div class="account-avatar" aria-hidden="true">♪</div><div class="account-details"><span class="account-eyebrow">明明音乐账号</span><h2>' + (loggedIn ? "已登录" : "还没有登录") + '</h2><p>' + (loggedIn ? "此设备已连接账号，收藏和播放列表会随账号同步。" : "登录账号后，可在设备间同步收藏和播放列表。") + '</p><div class="account-actions">';
     if (loggedIn) html += '<button id="account-logout" class="account-action account-logout focusable" type="button">退出登录</button><span id="account-message" class="account-message" aria-live="polite"></span>';
     else html += '<button id="account-login" class="account-action account-primary focusable" type="button">登录</button><button id="account-register" class="account-action account-secondary focusable" type="button">注册</button><button id="account-scan-login" class="scan-button focusable" type="button">' + scanIcon() + '<span>扫码登录</span></button><button id="account-scan-register" class="scan-button focusable" type="button">' + scanIcon() + '<span>扫码注册</span></button><button id="account-reset" class="account-action account-link focusable" type="button">忘记密码</button>';
@@ -723,7 +766,7 @@
     if (loggedIn) document.getElementById("account-logout").addEventListener("click", logout);
     else { document.getElementById("account-scan-login").onclick = function () { openScan("login"); }; document.getElementById("account-scan-register").onclick = function () { openScan("register"); }; document.getElementById("account-login").addEventListener("click", function () { openLogin("login"); }); document.getElementById("account-register").addEventListener("click", function () { openLogin("register"); }); document.getElementById("account-reset").addEventListener("click", function () { openLogin("reset"); }); }
    restoreBookmark(content, savedFocus); }
-  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else renderFavorites(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
+  function renderPage(page) { var previous = document.activeElement; if (state.scan) closeScan(); state.detailReturn = null; state.detailKind = ""; state.artistDetail = null; state.albumDetail = null; state.returnPlaylist = null; state.page = page; content.scrollTop = 0; focusMemory.footerReturn = null; each(document, ".nav-item", function (b) { b.classList.toggle("is-active", b.getAttribute("data-page") === page); }); if (page === "recommend") renderRecommend(); else if (page === "search") renderSearch(); else if (page === "playlists") renderPlaylists(); else if (page === "inspiration") renderInspiration(); else if (page === "queue") renderQueue(); else if (page === "recent") renderRecent(); else if (page === "account") renderAccount(); else if (page === "settings") renderSettings(); else renderFavorites(); if (!isFocusable(previous) && focusRoot() === document) focusTarget(activeNav()); }
   function toggleQueue(song) {
     if (!song) return;
     if (isQueued(song)) removeQueuedSong(song);
@@ -885,7 +928,7 @@
   function holdCommentMotion() { commentMotion.holdUntil = Date.now() + 5000; }
   function canMoveComments() {
     var root = document.getElementById("overlay-comments");
-    return state.playerOpen && !state.commentsHidden && state.current && state.playbackStatus === "playing" && !playbackPaused() && (nativePlayer || !audio.ended) && !document.hidden && !commentMotion.background && !state.queueOpen && document.getElementById("modal-root").hidden && root.clientHeight > 0 && !root.contains(document.activeElement);
+    return state.playerOpen && !state.commentsHidden && !document.getElementById("app").classList.contains("reduced-motion") && state.current && state.playbackStatus === "playing" && !playbackPaused() && (nativePlayer || !audio.ended) && !document.hidden && !commentMotion.background && !state.queueOpen && document.getElementById("modal-root").hidden && root.clientHeight > 0 && !root.contains(document.activeElement);
   }
   function stopCommentMotion() { if (commentMotion.frame !== null) cancelFrame(commentMotion.frame); commentMotion.frame = null; commentMotion.last = 0; }
   function syncCommentMotion() {
@@ -968,7 +1011,7 @@
     var comments = document.getElementById("overlay-comments"), button = document.getElementById("player-comments-toggle");
     stopCommentMotion();
     if (!state.commentsHidden) state.commentsScroll = comments.scrollTop;
-    state.commentsHidden = !state.commentsHidden; renderCommentsVisibility();
+    state.commentsHidden = !state.commentsHidden; writePreference("mingming.commentDefault", state.commentsHidden ? "hide" : "show"); renderCommentsVisibility();
     renderOverlayLyrics();
     if (!state.commentsHidden) comments.scrollTop = state.commentsScroll;
     // Force the grid to settle before centering the active line after the
@@ -1523,5 +1566,5 @@
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
   document.addEventListener("keydown", function (e) { if (e.keyCode === 27 || e.keyCode === 4) { if (handleBack()) e.preventDefault(); return; } if (e.keyCode === 37 || e.keyCode === 38 || e.keyCode === 39 || e.keyCode === 40 || e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 66) { e.preventDefault(); moveFocus(e.keyCode); } });
 
-  bindArtistAlbumsScroll(); renderControlIcons(); renderPlayMode(); loadSearchHistory(); api("/health", "GET", null, function (err, data) { var dot = document.getElementById("connection-dot"), label = document.getElementById("connection-label"); if (!err && data) { dot.className = "status-dot ready"; label.textContent = data.capabilities && data.capabilities.fixture ? "预览数据" : "在线音乐"; state.fixture = !!(data.capabilities && data.capabilities.fixture); } else label.textContent = "服务连接失败"; }); loadLibrary(); loadPlayback(); renderPage("recommend"); focusInitial();
+  bindArtistAlbumsScroll(); renderControlIcons(); renderPlayMode(); loadSearchHistory(); state.commentsHidden = readPreference("mingming.commentDefault", "show") === "hide"; applySidebarMode(readPreference("mingming.sidebarMode", "expanded")); applyTextScale(readPreference("mingming.textScale", "standard")); applyMotionMode(readPreference("mingming.motion", "normal")); api("/health", "GET", null, function (err, data) { var dot = document.getElementById("connection-dot"), label = document.getElementById("connection-label"); if (!err && data) { dot.className = "status-dot ready"; label.textContent = data.capabilities && data.capabilities.fixture ? "预览数据" : "在线音乐"; state.fixture = !!(data.capabilities && data.capabilities.fixture); } else label.textContent = "服务连接失败"; }); loadLibrary(); loadPlayback(); renderPage("recommend"); focusInitial();
 }());
