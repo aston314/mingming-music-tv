@@ -84,7 +84,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     const firstQueueRow = page.locator('.queue-popup [data-track-id="resume-first"]');
     assert.equal(await firstQueueRow.locator('.track-info span').textContent(), '恢复测试歌手');
     assert.equal(await page.locator('.queue-popup [data-track-id="resume-next"] .track-info span').textContent(), '测试歌手');
-    assert.deepEqual(await firstQueueRow.locator('[data-action]').evaluateAll(nodes => nodes.map(n => n.dataset.action)), ['artist-info', 'queue', 'favorite']);
+    assert.deepEqual(await firstQueueRow.locator('[data-action]').evaluateAll(nodes => nodes.map(n => n.dataset.action)), ['artist-info', 'queue', 'favorite', 'artist-album']);
     await firstQueueRow.focus();
     await page.evaluate(() => window.MingmingTVKey(22));
     assert.equal(await page.evaluate(() => document.activeElement.dataset.action), 'artist-info');

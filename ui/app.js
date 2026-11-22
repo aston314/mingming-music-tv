@@ -410,6 +410,7 @@
     else actions += queueTrackAction(song);
     if (state.page === "favorites") actions += trackAction("remove-favorite", "delete", "从收藏删除");
     else actions += trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
+    actions += trackAction("artist-album", "artist-info", "查看歌手和专辑详情");
     return songRowMarkup(song, index, actions, false);
   }
   function songRowMarkup(song, index, actions, queueView) {
@@ -453,7 +454,7 @@
         var target = event.target, action = null, i, list = source || state.songs;
         while (target && target !== el) { if (target.getAttribute && target.getAttribute("data-action")) { action = target.getAttribute("data-action"); break; } target = target.parentNode; }
         i = parseInt(el.getAttribute("data-song"), 10);
-        if (action === "artist-info") { openShareMenu(list[i]); event.stopPropagation(); return; }
+        if (action === "artist-info" || action === "artist-album") { openShareMenu(list[i]); event.stopPropagation(); return; }
         if (action === "queue") { toggleQueue(list[i]); event.stopPropagation(); return; }
         if (action === "favorite") { toggleFavorite(list[i]); event.stopPropagation(); return; }
         if (action === "remove-queue" || action === "remove-favorite") { removeLibrarySong(list[i], action, i); event.stopPropagation(); return; }
@@ -1159,6 +1160,7 @@
       actions = trackAction("artist-info", "artist-info", "查看歌手和专辑详情");
       actions += state.playbackListSource === "queue" ? trackAction("remove-queue", "delete", "从播放列表删除") : queueTrackAction(song);
       actions += trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
+      actions += trackAction("artist-album", "artist-info", "查看歌手和专辑详情");
       html += songRowMarkup(song, i, actions, true);
     }
     return html || (queueLoading.data ? '<div class="queue-list-loading" role="status"><span class="loading-ring" aria-hidden="true"></span><span>正在加载播放列表…</span></div>' : '<div class="state">播放列表为空</div>');
@@ -1188,7 +1190,7 @@
       el.addEventListener("click", function (event) {
         var node = event.target, action = null, index = parseInt(el.getAttribute("data-song"), 10), song = items[index], top = popup.querySelector(".queue-popup-list").scrollTop;
         while (node && node !== el) { if (node.getAttribute && node.getAttribute("data-action")) { action = node.getAttribute("data-action"); break; } node = node.parentNode; }
-        if (action === "artist-info") { openShareMenu(song); return; }
+        if (action === "artist-info" || action === "artist-album") { openShareMenu(song); return; }
         if (action === "queue") { toggleQueue(song); return; }
         if (action === "favorite") { toggleFavorite(song); return; }
         if (action === "remove-queue" && state.playbackListSource === "queue") {

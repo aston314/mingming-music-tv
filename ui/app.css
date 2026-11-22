@@ -412,8 +412,9 @@
 #overlay-lyrics.lyrics-four-line .has-word-timing.active{color:#dce9dd}
 
 /* Artist and album replace the generic fullscreen heading. */
-.player-overlay-head>div{flex:1 1 0;min-width:0}
-.player-overlay-head .overlay-track-meta{max-width:100%;color:#c1d0c2;font-size:24px;font-weight:500;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.player-overlay-head{min-width:0;overflow:hidden}
+.player-overlay-head>div{flex:1 1 0;min-width:0;max-width:calc(100% - 64px);overflow:hidden}
+.player-overlay-head .overlay-track-meta{display:block;max-width:100%;min-width:0;color:#c1d0c2;font-size:24px;font-weight:500;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .overlay-lyrics .lyric-loading{display:flex;align-items:center;justify-content:center;height:100%;padding:0;font-size:22px;color:#acbeb0}
 .lyric-loading .loading-ring{margin-right:14px;width:26px;height:26px}
 
