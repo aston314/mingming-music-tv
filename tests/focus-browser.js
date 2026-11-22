@@ -109,7 +109,7 @@ async function runFocusAudit(stage) {
     auditCheck(!document.getElementById('overlay-lyrics').classList.contains('focusable')&&document.getElementById('overlay-lyrics').tabIndex===-1,'fullscreen lyrics excluded from focus graph');
     auditPath('#player-close',22,'#player-comments-toggle');auditPath('#player-comments-toggle',21,'#player-close');auditPath('#player-comments-toggle',20,'#overlay-comments .comment');
     auditFocus('#player-comments-toggle');document.activeElement.click();auditCheck(document.activeElement.id==='player-comments-toggle'&&document.activeElement.getAttribute('aria-expanded')==='false','hide comments keeps toggle focus');
-    auditPath('#overlay-queue',22,'#player-comments-toggle','hidden comments right reaches toggle');auditPath('#overlay-favorite',22,'#player-comments-toggle');auditPath('#player-comments-toggle',20,'#overlay-favorite');await auditSweep('#player-overlay');
+    auditPath('#overlay-queue',22,'#player-comments-toggle','hidden comments right reaches toggle');auditPath('#overlay-favorite',22,'#overlay-artist-info');auditPath('#overlay-artist-info',22,'#player-comments-toggle');auditPath('#overlay-artist-info',21,'#overlay-favorite');auditPath('#player-comments-toggle',20,'#overlay-favorite');await auditSweep('#player-overlay');
     auditFocus('#player-comments-toggle');document.activeElement.click();auditCheck(document.activeElement.id==='player-comments-toggle'&&document.activeElement.getAttribute('aria-expanded')==='true','show comments keeps toggle focus');
     auditPath('#overlay-queue',22,'#overlay-comments .comment');auditMove(21);auditCheck(document.activeElement.id==='overlay-queue','comments left restores controls');
     await auditSweep('#player-overlay');
