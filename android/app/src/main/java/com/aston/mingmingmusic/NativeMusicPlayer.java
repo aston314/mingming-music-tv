@@ -355,7 +355,10 @@ final class NativeMusicPlayer {
     private static String request(String address, String method, String body, String contentType) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         try {
-            connection.setConnectTimeout(2000); connection.setReadTimeout(18000); connection.setRequestMethod(method);
+            // The core may spend up to 45 seconds resolving a slow upstream
+            // source. Keep the native bridge above that budget so Android does
+            // not report a resolver failure while the Go request is still in flight.
+            connection.setConnectTimeout(5000); connection.setReadTimeout(50000); connection.setRequestMethod(method);
             connection.setRequestProperty("Content-Type", contentType); connection.setDoOutput(true);
             byte[] encoded = body.getBytes(StandardCharsets.UTF_8); connection.setFixedLengthStreamingMode(encoded.length);
             try (java.io.OutputStream out = connection.getOutputStream()) { out.write(encoded); }

@@ -46,7 +46,7 @@ func New(cfg product.Config, version, instance, dataDir string, fixture bool) *S
 		instance:    instance,
 		dataDir:     dataDir,
 		fixture:     fixture,
-		client:      &http.Client{Timeout: 30 * time.Second},
+		client:      &http.Client{Timeout: 45 * time.Second},
 		mediaClient: &http.Client{Transport: mediaTransport},
 	}
 	mux := http.NewServeMux()

@@ -421,7 +421,7 @@
 
 /* Older Android WebViews do not support inset, grid or CSS custom properties. */
 .player-overlay{top:0;right:0;bottom:0;left:0}
-.player-art-panel{padding-bottom:10px;overflow:hidden}
+.player-art-panel{padding-bottom:24px;overflow:visible;position:relative;z-index:1}
 .player-bar .now-playing{position:relative;display:block;height:82px;padding:14px 10px 10px 96px}
 .player-bar .now-playing img{position:absolute;left:10px;top:7px}
 .player-bar .now-playing-copy{position:absolute;top:50%;right:10px;left:96px;display:block;margin:0;transform:translateY(-50%)}
