@@ -550,14 +550,24 @@
   function albumId(song) { var value = song && (song.al || song.album); return value && typeof value === "object" ? (value.id || value.albumId) : song && (song.albumId || song.album_id); }
   function formatDate(value) { var date; if (!value) return "未知日期"; date = new Date(Number(value)); return isFinite(date.getTime()) ? date.getFullYear() + "-" + (date.getMonth() + 1 < 10 ? "0" : "") + (date.getMonth() + 1) + "-" + (date.getDate() < 10 ? "0" : "") + date.getDate() : "未知日期"; }
   function restoreDetailSource(source) {
-    var target, page = source && source.page || "recommend", shareSong = source && source.share ? source.song : null;
+    var target, page = source && source.page || "recommend", shareSong = source && source.share ? source.song : null, playerInfo;
     state.detailKind = ""; state.detailReturn = null; state.artistDetail = null; state.albumDetail = null;
     renderPage(page);
     if (page === "search" && state.searchQuery) renderSearchResults(document.getElementById("search-results"));
     target = source && source.trackId ? content.querySelector('.track-row[data-track-id="' + esc(source.trackId) + '"]') : null;
     if (target && source.action) target = target.querySelector('[data-action="' + esc(source.action) + '"]') || target;
     if (target) focusTarget(target);
-    if (shareSong) openShareMenu(shareSong);
+    if (shareSong) {
+      // Details opened from the fullscreen poster must return to that same
+      // player context. Re-open it before the share modal so Back first
+      // restores the modal's originating artist/album action.
+      if (source.player && state.current && sameSong(state.current, shareSong)) {
+        openPlayerOverlay();
+        playerInfo = document.getElementById("overlay-artist-info");
+        if (playerInfo) playerInfo.focus();
+      }
+      openShareMenu(shareSong);
+    }
   }
   function openShareMenu(song) {
     var root = document.getElementById("modal-root"), previous = document.activeElement, html;
@@ -598,8 +608,9 @@
     if (restore !== false && previous && document.body.contains(previous)) focusTarget(previous);
   }
   function openArtistDetail(song) {
-    var id = artistId(song), source = {kind: "source", page: state.page === "queue" ? "queue" : state.page, trackId: String(song.id), action: "artist-info", rowIndex: parseInt((document.activeElement && document.activeElement.parentNode && document.activeElement.parentNode.getAttribute("data-song")) || 0, 10), share: true, song: song};
+    var id = artistId(song), fromPlayer = state.playerOpen, source = {kind: "source", page: state.page === "queue" ? "queue" : state.page, trackId: String(song.id), action: "artist-info", rowIndex: parseInt((document.activeElement && document.activeElement.parentNode && document.activeElement.parentNode.getAttribute("data-song")) || 0, 10), share: true, player: fromPlayer, song: song};
     closeShareMenu(false); state.detailKind = "artist"; state.detailReturn = source; content.scrollTop = 0; renderState("正在加载歌手详情…");
+    if (fromPlayer) closePlayerOverlay();
     if (id) loadArtistById(id, source, song);
     else resolveNeteaseSong(song, function (resolved) {
       var resolvedID = artistId(resolved);
@@ -663,10 +674,11 @@
     content.setAttribute("data-artist-albums-scroll-bound", "true"); content.addEventListener("scroll", maybeLoadArtistAlbums);
   }
   function openAlbumDetail(song) {
-    var id = albumId(song), parent = state.detailKind === "artist" && state.artistDetail ? {kind: "artist", detail: state.artistDetail, albums: state.artistAlbums.slice(0), offset: state.artistAlbumsOffset, more: state.artistAlbumsMore, source: state.detailReturn, albumId: String(id || song.id)} : state.detailReturn;
-    var source = parent && parent.kind === "artist" ? parent : {kind: "source", page: state.page, trackId: String(song.id), action: "artist-info", share: true, song: song};
+    var id = albumId(song), fromPlayer = state.playerOpen, parent = state.detailKind === "artist" && state.artistDetail ? {kind: "artist", detail: state.artistDetail, albums: state.artistAlbums.slice(0), offset: state.artistAlbumsOffset, more: state.artistAlbumsMore, source: state.detailReturn, albumId: String(id || song.id)} : state.detailReturn;
+    var source = parent && parent.kind === "artist" ? parent : {kind: "source", page: state.page, trackId: String(song.id), action: "artist-info", share: true, player: fromPlayer, song: song};
     function load(id) { api("/api/netease/album?id=" + encodeURIComponent(id), "GET", null, function (err, data) { if (state.detailKind !== "album" || state.detailReturn !== source) return; if (err || !data || !(data.album || data.songs)) { renderState((err && err.message) || "专辑详情加载失败", true); return; } renderAlbumDetail(data); }); }
     closeShareMenu(false); state.detailKind = "album"; state.detailReturn = source; content.scrollTop = 0; renderState("正在加载专辑详情…");
+    if (fromPlayer) closePlayerOverlay();
     if (id) load(id);
     else resolveNeteaseSong(song, function (resolved) {
       var resolvedID = albumId(resolved);

@@ -56,6 +56,21 @@ async function detailsFlow({browser, url, screenshotsDir, android}) {
     await page.evaluate(() => window.MingmingTVBack());
     if (await page.evaluate(() => document.activeElement.getAttribute('data-action')) !== 'artist-info') throw new Error('share menu back did not restore artist info focus');
 
+    // The same details menu is reachable from the fullscreen poster. Details
+    // must replace the fullscreen layer while loading, then restore it behind
+    // the menu when Back unwinds the detail route.
+    await row.click();
+    await page.locator('#now-playing').click();
+    await page.locator('#overlay-artist-info').click();
+    await page.locator('[data-share-action="artist"]').click();
+    await page.waitForSelector('.artist-hero');
+    assert.equal(await page.locator('#player-overlay').getAttribute('hidden'), '', 'fullscreen layer closes for artist details');
+    await page.evaluate(() => window.MingmingTVBack());
+    assert.equal(await page.locator('#modal-root').getAttribute('hidden'), null, 'fullscreen artist Back restores share menu');
+    assert.equal(await page.locator('#player-overlay').getAttribute('hidden'), null, 'fullscreen artist Back restores player');
+    await page.evaluate(() => window.MingmingTVBack());
+    await page.evaluate(() => window.MingmingTVBack());
+
     await row.focus();
     await row.locator('[data-action="artist-info"]').click();
     await page.locator('[data-share-action="album"]').click();
