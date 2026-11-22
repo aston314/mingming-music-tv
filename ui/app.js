@@ -928,6 +928,7 @@
     var attrs = 'viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
     if (name === "prev") return '<svg ' + attrs + '><path d="M6 5v14M19 6l-9 6 9 6V6Z"/></svg>';
     if (name === "next") return '<svg ' + attrs + '><path d="M18 5v14M5 6l9 6-9 6V6Z"/></svg>';
+    if (name === "artist-info") return '<svg ' + attrs + '><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.7-3.4 3.1-5.2 7-5.2s6.3 1.8 7 5.2"/><circle cx="19" cy="18" r="3"/><path d="M19 16.6v2.8M17.6 18h2.8"/></svg>';
     if (name === "pause") return '<svg ' + attrs + '><path d="M8 5v14M16 5v14"/></svg>';
     if (name === "queue") return '<svg ' + attrs + '><path d="M4 6h16M4 12h16M4 18h9"/></svg>';
     if (name === "close") return '<svg ' + attrs + '><path d="m15 5-7 7 7 7"/></svg>';
