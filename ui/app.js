@@ -733,14 +733,14 @@
     if (!current || !status || !button) return;
     if (typeof parsed === "string") { try { parsed = JSON.parse(parsed); } catch (ignore) { parsed = null; } }
     parsed = parsed || {};
-    current.textContent = parsed.current_version || "v" + "0.1.28";
+    current.textContent = parsed.current_version || "v" + "0.1.29";
     status.textContent = parsed.message || (parsed.state === "browser" ? "浏览器预览不支持安装更新" : "启动后每天自动检查一次，播放时不打扰。");
     button.disabled = parsed.state === "checking" || parsed.state === "downloading";
     button.textContent = parsed.state === "checking" ? "检查中…" : parsed.state === "downloading" ? "下载中…" : parsed.state === "available" ? "查看更新 " + (parsed.latest_version || "") : "检查更新";
   }
   function pollUpdateStatus() {
     var bridge = window.MingmingTVUpdates;
-    if (!bridge || !bridge.getStatus) { renderUpdateStatus({state: "browser", current_version: "v0.1.28"}); return; }
+    if (!bridge || !bridge.getStatus) { renderUpdateStatus({state: "browser", current_version: "v0.1.29"}); return; }
     renderUpdateStatus(bridge.getStatus());
     window.clearInterval(settingsUpdateTimer);
     settingsUpdateTimer = window.setInterval(function () {
@@ -759,7 +759,7 @@
     document.getElementById("settings-motion-normal").addEventListener("click", function () { applyMotionMode("normal"); renderSettings(); focusTarget(document.getElementById("settings-motion-normal")); });
     document.getElementById("settings-motion-reduced").addEventListener("click", function () { applyMotionMode("reduced"); renderSettings(); focusTarget(document.getElementById("settings-motion-reduced")); });
     document.getElementById("settings-comments-default").addEventListener("click", function () { var enabled = readPreference("mingming.commentDefault", "show") === "hide"; writePreference("mingming.commentDefault", enabled ? "show" : "hide"); state.commentsHidden = !enabled; renderSettings(); focusTarget(document.getElementById("settings-comments-default")); });
-    document.getElementById("settings-check-update").addEventListener("click", function () { var bridge = window.MingmingTVUpdates; if (!bridge || !bridge.check) { renderUpdateStatus({state: "browser", current_version: "v0.1.28"}); return; } bridge.check(); pollUpdateStatus(); });
+    document.getElementById("settings-check-update").addEventListener("click", function () { var bridge = window.MingmingTVUpdates; if (!bridge || !bridge.check) { renderUpdateStatus({state: "browser", current_version: "v0.1.29"}); return; } bridge.check(); pollUpdateStatus(); });
     pollUpdateStatus(); restoreBookmark(content, savedFocus);
   }
   function renderAccount() { var savedFocus = bookmark(content); var loggedIn = state.authenticated, html = pageTitle("我的", "账号与同步") + '<section class="account-page"><div class="account-avatar" aria-hidden="true">♪</div><div class="account-details"><span class="account-eyebrow">明明音乐账号</span><h2>' + (loggedIn ? "已登录" : "还没有登录") + '</h2><p>' + (loggedIn ? "此设备已连接账号，收藏和播放列表会随账号同步。" : "登录账号后，可在设备间同步收藏和播放列表。") + '</p><div class="account-actions">';
