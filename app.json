@@ -2,8 +2,8 @@
   "productId": "mingming-music-tv",
   "displayName": "明明音乐",
   "applicationId": "com.aston.mingmingmusic",
-  "versionName": "0.1.31",
-  "versionCode": 32,
+  "versionName": "0.1.32",
+  "versionCode": 33,
   "platform": "Android TV",
   "minSdk": 23,
   "canvas": {
