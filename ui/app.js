@@ -719,8 +719,19 @@
   function renderQueue() { var savedFocus = bookmark(content); state.page = "queue"; state.libraryView = "queue"; content.innerHTML = pageTitle("播放列表", state.queue.length + " 首歌曲") + queueTabs("queue") + recentHero() + (state.queue.length ? '<div class="track-list">' + state.queue.map(track).join("") + '</div>' : '<div class="empty">播放列表还是空的</div>'); bindLibraryTabs(); bindRecentHero(); bindSongActions(content, state.queue);  restoreBookmark(content, savedFocus); }
   function renderRecent() { var savedFocus = bookmark(content); state.page = "queue"; state.libraryView = "recent"; content.innerHTML = pageTitle("最近播放", state.recent.length + " 首歌曲") + queueTabs("recent") + recentHero() + (state.recent.length ? '<div class="track-list">' + state.recent.map(track).join("") + '</div>' : '<div class="empty">还没有最近播放记录</div>'); bindLibraryTabs(); bindRecentHero(); bindSongActions(content, state.recent);  restoreBookmark(content, savedFocus); }
   function renderFavorites() { var savedFocus = bookmark(content); content.innerHTML = pageTitle("我的收藏", state.favorites.length + " 首歌曲") + (state.favorites.length ? '<div class="track-list">' + state.favorites.map(track).join("") + '</div>' : '<div class="empty">' + (state.authenticated ? '暂无收藏，点击歌曲旁的爱心即可收藏' : '登录后收藏喜欢的音乐') + '</div>'); bindSongActions(content, state.favorites);  restoreBookmark(content, savedFocus); }
-  function readPreference(key, fallback) { try { var value = window.localStorage.getItem(key); return value == null ? fallback : value; } catch (ignore) { return fallback; } }
-  function writePreference(key, value) { try { window.localStorage.setItem(key, value); } catch (ignore) {} }
+  function readPreference(key, fallback) {
+    try {
+      if (window.MingmingTVPreferences && window.MingmingTVPreferences.get) {
+        var nativeValue = window.MingmingTVPreferences.get(key, "");
+        if (nativeValue !== "") return nativeValue;
+      }
+    } catch (ignoreNative) {}
+    try { var value = window.localStorage.getItem(key); return value == null ? fallback : value; } catch (ignore) { return fallback; }
+  }
+  function writePreference(key, value) {
+    try { if (window.MingmingTVPreferences && window.MingmingTVPreferences.set) window.MingmingTVPreferences.set(key, String(value)); } catch (ignoreNative) {}
+    try { window.localStorage.setItem(key, value); } catch (ignore) {}
+  }
   function applySidebarMode(mode) {
     var app = document.getElementById("app"), icons = mode === "icons";
     if (app) app.classList.toggle("sidebar-icons-only", icons);
@@ -831,11 +842,13 @@
     var root = document.getElementById("overlay-lyrics"), four = state.commentsHidden && !!state.lyricLines.length, markup;
     if (!root) return;
     root.classList.toggle("lyrics-four-line", four);
+    root.classList.toggle("lyrics-five-line", four);
     if (overlayLyricView.lines === state.lyricLines && overlayLyricView.message === state.lyricsText && overlayLyricView.four === four) return;
     markup = state.current && !state.lyricsLoaded && !state.lyricLines.length ? '<div class="state lyric-loading" role="status"><span class="loading-ring" aria-hidden="true"></span><span>正在加载歌词…</span></div>' : lyricMarkup();
-    // Retain every timed line. A padded, clipped track puts the current line
-    // in slot two, including the start/end of a song, without duplicating it.
-    root.innerHTML = four ? '<div class="four-lyric-track"><div class="lyric-spacer" aria-hidden="true"></div>' + markup + '<div class="lyric-spacer" aria-hidden="true"></div><div class="lyric-spacer" aria-hidden="true"></div></div>' : markup;
+    // Retain every timed line. Two leading and three trailing spacer rows put
+    // the current line in the middle of a five-row TV window without
+    // duplicating lyric text at the beginning or end of a song.
+    root.innerHTML = four ? '<div class="four-lyric-track five-lyric-track"><div class="lyric-spacer" aria-hidden="true"></div><div class="lyric-spacer" aria-hidden="true"></div>' + markup + '<div class="lyric-spacer" aria-hidden="true"></div><div class="lyric-spacer" aria-hidden="true"></div><div class="lyric-spacer" aria-hidden="true"></div></div>' : markup;
     lyricActiveNode = null; lyricMotion.wordTime = -1;
     overlayLyricView.lines = state.lyricLines; overlayLyricView.message = state.lyricsText; overlayLyricView.four = four;
     overlayLyricView.width = 0; overlayLyricView.height = 0; overlayLyricView.index = -1; overlayLyricView.time = null;
@@ -848,13 +861,14 @@
     if (!track || width <= 0 || height <= 0) return;
     resized = width !== overlayLyricView.width || height !== overlayLyricView.height;
     if (force || resized || index !== overlayLyricView.index) {
-      rowHeight = height / 4; family = window.getComputedStyle(root).fontFamily;
+      rowHeight = height / 5; family = window.getComputedStyle(root).fontFamily;
       if (!overlayLyricView.measure) { try { overlayLyricView.measure = document.createElement("canvas").getContext("2d"); } catch (ignore) {} }
       nodes = track.children;
       for (i = 0; i < nodes.length; i++) {
         nodes[i].style.height = rowHeight + "px"; nodes[i].style.lineHeight = rowHeight + "px";
         lineIndex = parseInt(nodes[i].getAttribute("data-lyric-index"), 10);
         if (isNaN(lineIndex)) continue;
+        nodes[i].classList.toggle("four-previous-two", lineIndex === index - 2);
         nodes[i].classList.toggle("four-previous", lineIndex === index - 1);
         nodes[i].classList.toggle("four-next", lineIndex === index + 1);
         nodes[i].classList.toggle("four-last", lineIndex === index + 2);

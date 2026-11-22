@@ -71,9 +71,9 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
       const normalFont = await page.locator('#overlay-lyrics .active').evaluate(node => getComputedStyle(node).fontSize);
       await page.locator('#player-comments-toggle').click();
       let view = await inspect();
-      assert.deepEqual(view.visible, [2, 3, 4, 5]);
+      assert.deepEqual(view.visible, [1, 2, 3, 4, 5]);
       assert.equal(view.count, texts.length, 'all timing data remains available');
-      assert.ok(Math.abs(view.slot - .375) < .01, 'current sentence stays in slot two');
+      assert.ok(Math.abs(view.slot - .5) < .01, 'current sentence stays in the middle of five rows');
       assert.ok(view.font > view.nextFont * 1.3 && view.font > parseFloat(normalFont) * 2, 'current sentence uses a large TV font');
       assert.equal(view.clipped, false); assert.equal(view.nowrap, 'nowrap'); assert.equal(view.focusable, false);
       assert.equal(view.focus, 'player-comments-toggle'); assert.match(view.gradient, /199, 243, 141/, 'karaoke uses our accent green');
@@ -109,11 +109,11 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
       await page.locator('#overlay-play').click();
       await position(85, 8);
       view = await inspect();
-      assert.deepEqual(view.visible, [7, 8, 9, 10]); assert.equal(view.transition, '0s', 'seek jumps directly to its four-line window');
+      assert.deepEqual(view.visible, [6, 7, 8, 9, 10]); assert.equal(view.transition, '0s', 'seek jumps directly to its five-line window');
       await position(.25, 0); view = await inspect();
-      assert.deepEqual(view.visible, [0, 1, 2]); assert.ok(Math.abs(view.slot - .375) < .01, 'first line leaves its previous slot blank');
+      assert.deepEqual(view.visible, [0, 1, 2]); assert.ok(Math.abs(view.slot - .5) < .01, 'first line stays centered with leading blank rows');
       await position(115, 11); view = await inspect();
-      assert.deepEqual(view.visible, [10, 11]); assert.ok(Math.abs(view.slot - .375) < .01, 'last line leaves trailing slots blank');
+      assert.deepEqual(view.visible, [9, 10, 11]); assert.ok(Math.abs(view.slot - .5) < .01, 'last line stays centered with trailing blank rows');
       await page.locator('#player-comments-toggle').click();
       assert.equal(await page.locator('#overlay-lyrics .four-lyric-track').count(), 0);
       assert.equal(await page.locator('#overlay-lyrics .lyric-line').count(), texts.length);
@@ -123,13 +123,13 @@ module.exports = async function fourLineLyrics({browser, url, screenshotsDir}) {
       assert.ok(placement.top >= placement.containerTop - 1 && placement.bottom <= placement.containerBottom + 1, 'expanded list follows current playback: ' + JSON.stringify(placement));
       await page.locator('#player-comments-toggle').click();
       await page.keyboard.press('Escape'); await page.locator('#now-playing').click();
-      assert.deepEqual((await inspect()).visible, [10, 11], 'reopening keeps the current four-line view');
+      assert.deepEqual((await inspect()).visible, [9, 10, 11], 'reopening keeps the current five-line view');
       await page.evaluate(() => {window.mockPlayback.snapshot.track = {...window.mockPlayback.snapshot.track, id: 'four-line-next'}; window.mockPlayback.snapshot.position = .25;});
       await page.waitForFunction(() => {const active = document.querySelector('#overlay-lyrics .active'); return active && Number(active.dataset.lyricIndex) === 0;});
-      assert.deepEqual((await inspect()).visible, [0, 1, 2], 'next song resets the window');
+      assert.deepEqual((await inspect()).visible, [0, 1, 2], 'next song resets the five-line window');
 
-      // Plain LRC retains the four-row layout; no lyric data keeps the usual
-      // empty state rather than producing four fake sentences.
+      // Plain LRC retains the five-row layout; no lyric data keeps the usual
+      // empty state rather than producing five fake sentences.
       await context.route('**/api/word-lyric?*', route => route.fulfill({json: {code: 1, data: {lyric: ''}}}));
       await context.route('**/api/music/lrc', route => route.fulfill({json: {data: '[00:00.00]普通歌词第一句\n[00:10.00]普通歌词第二句\n[00:20.00]普通歌词第三句\n[00:30.00]普通歌词第四句'}}));
       await page.evaluate(() => {window.mockPlayback.snapshot.track = {...window.mockPlayback.snapshot.track, id: 'plain-lrc'}; window.mockPlayback.snapshot.position = 15;});

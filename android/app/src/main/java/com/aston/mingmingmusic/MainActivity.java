@@ -104,6 +104,7 @@ public final class MainActivity extends Activity {
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
         web.addJavascriptInterface(new MusicBridge(), "MingmingNativePlayer");
         web.addJavascriptInterface(new AppBridge(), "MingmingTVApp");
+        web.addJavascriptInterface(new MingmingTVPreferences(this), "MingmingTVPreferences");
         appUpdater = new MingmingAppUpdater(this, new MingmingAppUpdater.Host() {
             @Override public boolean trusted() { return ready && !destroyed; }
             @Override public boolean foreground() { return activityForeground && !isFinishing(); }
