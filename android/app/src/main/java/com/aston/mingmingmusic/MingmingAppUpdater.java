@@ -88,15 +88,23 @@ final class MingmingAppUpdater {
     }
     private Manifest fetchManifest(int epoch) throws Exception {
         String endpoint = BuildConfig.UPDATE_ENDPOINT; if (endpoint == null || endpoint.length() == 0) throw new IOException("未配置更新地址");
-        HttpURLConnection request = open(endpoint + (endpoint.indexOf('?') >= 0 ? "&" : "?") + "check=" + System.currentTimeMillis(), epoch);
+        Exception failure = null; String[] sources = new String[]{"https://ghfast.top/" + endpoint, endpoint};
+        for (String source : sources) {
+            try { return readManifest(source + (source.indexOf('?') >= 0 ? "&" : "?") + "check=" + System.currentTimeMillis(), epoch); }
+            catch (Exception error) { failure = error; }
+        }
+        throw failure == null ? new IOException("更新服务不可用") : failure;
+    }
+    private Manifest readManifest(String address, int epoch) throws Exception {
+        HttpURLConnection request = open(address, epoch);
         try (InputStream stream = request.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[4096]; int count; while ((count = stream.read(buffer)) != -1) { ensureValid(epoch); if (output.size() + count > 65536) throw new IOException("版本信息过大"); output.write(buffer, 0, count); }
             return new Manifest(new JSONObject(output.toString("UTF-8")));
         } finally { request.disconnect(); if (connection == request) connection = null; }
     }
     private HttpURLConnection open(String address, int epoch) throws Exception {
-        URL target = new URL(address); if (!"https".equals(target.getProtocol()) || !"github.com".equals(target.getHost())) throw new IOException("更新连接必须使用 GitHub HTTPS");
-        HttpURLConnection request = (HttpURLConnection) target.openConnection(); connection = request; request.setConnectTimeout(8000); request.setReadTimeout(15000); request.setInstanceFollowRedirects(true); request.setUseCaches(false); request.setRequestProperty("Cache-Control", "no-cache"); request.setRequestProperty("User-Agent", "MingmingMusic/" + BuildConfig.VERSION_NAME); ensureValid(epoch); int code = request.getResponseCode(); String host = request.getURL().getHost(); if (code != 200 || !("github.com".equals(host) || "objects.githubusercontent.com".equals(host) || "release-assets.githubusercontent.com".equals(host))) throw new IOException("更新服务返回 HTTP " + code); return request;
+        URL target = new URL(address); if (!"https".equals(target.getProtocol()) || !("github.com".equals(target.getHost()) || "ghfast.top".equals(target.getHost()))) throw new IOException("更新连接必须使用 GitHub HTTPS");
+        HttpURLConnection request = (HttpURLConnection) target.openConnection(); connection = request; request.setConnectTimeout(8000); request.setReadTimeout(15000); request.setInstanceFollowRedirects(true); request.setUseCaches(false); request.setRequestProperty("Cache-Control", "no-cache"); request.setRequestProperty("User-Agent", "MingmingMusic/" + BuildConfig.VERSION_NAME); ensureValid(epoch); int code = request.getResponseCode(); String host = request.getURL().getHost(); if (code != 200 || !("github.com".equals(host) || "ghfast.top".equals(host) || "objects.githubusercontent.com".equals(host) || "release-assets.githubusercontent.com".equals(host))) throw new IOException("更新服务返回 HTTP " + code); return request;
     }
     private void showUpdatePrompt(final Manifest target) {
         if (dialog != null || destroyed || !host.foreground()) return;
@@ -118,14 +126,23 @@ final class MingmingAppUpdater {
     private void download(Manifest target, int epoch) {
         String error = "下载暂时不可用";
         try {
-            directory.mkdirs(); partial.delete(); HttpURLConnection request = open(target.url, epoch);
-            try (InputStream input = request.getInputStream(); FileOutputStream output = new FileOutputStream(partial)) {
-                String lengthText = request.getHeaderField("Content-Length"); if (lengthText != null && Long.parseLong(lengthText) != target.bytes) throw new IOException("安装包大小不匹配");
-                byte[] buffer = new byte[32768]; long total = 0; int count; long last = 0; while ((count = input.read(buffer)) != -1) { ensureValid(epoch); total += count; if (total > target.bytes) throw new IOException("安装包超过版本信息大小"); output.write(buffer, 0, count); long now = System.currentTimeMillis(); if (now - last > 250) { updateProgress(total, target.bytes, epoch); last = now; } }
-            } finally { request.disconnect(); if (connection == request) connection = null; }
+            directory.mkdirs(); Exception failure = null;
+            String[] sources = new String[]{"https://ghfast.top/" + target.url, target.url};
+            for (String source : sources) {
+                try { partial.delete(); downloadFrom(source, target, epoch); failure = null; break; }
+                catch (Exception attempt) { if (!valid(epoch)) throw attempt; failure = attempt; }
+            }
+            if (failure != null) throw failure;
             ensureValid(epoch); if (partial.length() != target.bytes || !target.sha256.equals(hash(partial))) throw new IOException("安装包校验失败"); verifyArchive(target, partial); if (apk.exists()) apk.delete(); if (!partial.renameTo(apk)) throw new IOException("无法保存安装包");
             activity.runOnUiThread(new Runnable() { @Override public void run() { if (!valid(epoch)) return; downloading = false; state = "ready"; message = "安装包已验证，准备安装"; publish(); dismissDialog(); launchInstaller(target); } });
         } catch (Exception failure) { error = friendly(failure); partial.delete(); final String text = error; activity.runOnUiThread(new Runnable() { @Override public void run() { if (!valid(epoch)) return; downloading = false; state = "error"; message = "下载失败：" + text; publish(); dismissDialog(); showFailure(message); } }); }
+    }
+    private void downloadFrom(String address, Manifest target, int epoch) throws Exception {
+        HttpURLConnection request = open(address, epoch);
+        try (InputStream input = request.getInputStream(); FileOutputStream output = new FileOutputStream(partial)) {
+            String lengthText = request.getHeaderField("Content-Length"); if (lengthText != null && Long.parseLong(lengthText) != target.bytes) throw new IOException("安装包大小不匹配");
+            byte[] buffer = new byte[32768]; long total = 0; int count; long last = 0; while ((count = input.read(buffer)) != -1) { ensureValid(epoch); total += count; if (total > target.bytes) throw new IOException("安装包超过版本信息大小"); output.write(buffer, 0, count); long now = System.currentTimeMillis(); if (now - last > 250) { updateProgress(total, target.bytes, epoch); last = now; } }
+        } finally { request.disconnect(); if (connection == request) connection = null; }
     }
     private void updateProgress(final long bytes, final long total, final int epoch) { activity.runOnUiThread(new Runnable() { @Override public void run() { if (!valid(epoch) || progress == null) return; int percent = (int) (bytes * 100 / Math.max(1, total)); progress.setIndeterminate(false); progress.setProgress(percent); if (progressText != null) progressText.setText(String.format(Locale.ROOT, "已下载 %.1f / %.1f MB · %d%%", bytes / 1048576.0, total / 1048576.0, percent)); publish(); } }); }
     private void verifyArchive(Manifest target, File value) throws Exception { PackageManager manager = activity.getPackageManager(); PackageInfo archive = manager.getPackageArchiveInfo(value.getPath(), PackageManager.GET_SIGNATURES); PackageInfo installed = manager.getPackageInfo(activity.getPackageName(), PackageManager.GET_SIGNATURES); if (archive == null || !installed.packageName.equals(archive.packageName) || archive.versionCode != target.code || !target.name.equals(archive.versionName) || !sameSigners(installed.signatures, archive.signatures)) throw new IOException("安装包应用、版本或签名不匹配"); }
