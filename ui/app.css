@@ -570,9 +570,11 @@ body{width:100%;height:100%;margin:0;overflow:hidden;background:#101713}
 .layout-soft .comment:focus{box-shadow:0 0 0 3px #c7f38d,0 8px 18px rgba(0,0,0,.14)}
 .layout-soft .player-bar{margin:14px 14px 12px;border-top:0;border-radius:24px;background:rgba(21,43,31,.94);box-shadow:0 10px 28px rgba(0,0,0,.24)}
 .layout-soft .player-overlay{background:linear-gradient(135deg,#18291d 0%,#0c120e 58%,#15251a 100%)}
-.layout-soft .overlay-section{border-left:0;border-radius:20px;background:rgba(18,31,23,.42);padding:18px 20px}
-.layout-soft .overlay-section-head{margin-bottom:16px}
-.layout-soft .player-detail-panel .comments-toggle{top:21px}
-.layout-soft .player-detail-panel .comments-toggle[aria-expanded="false"]{top:18px}
+.layout-soft .overlay-section{position:relative;border-left:0;border-radius:0;background:transparent;padding:66px 20px 0}
+.layout-soft .overlay-section-head{position:absolute;top:-75px;right:20px;left:20px;z-index:2;min-height:50px;margin:0;padding:0;align-items:center;pointer-events:none}
+.layout-soft .overlay-section-head .overlay-title-badge{min-height:50px;padding:0 8px 8px 0;border-radius:0;background:transparent;color:#eef4ee;border-bottom:2px solid rgba(199,243,141,.5)}
+.layout-soft .comment-section .overlay-section-head{padding-right:64px}
+.layout-soft .player-detail-panel .comments-toggle{top:-72px}
+.layout-soft .player-detail-panel .comments-toggle[aria-expanded="false"]{top:-75px}
 .layout-soft #overlay-lyrics.lyrics-four-line .lyric-line{padding-left:0;padding-right:0}
 .layout-soft .modal,.layout-soft .queue-dialog{border:0;box-shadow:0 24px 70px rgba(0,0,0,.58)}
