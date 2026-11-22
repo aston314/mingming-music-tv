@@ -331,7 +331,8 @@
     } else if (state.playerOpen) {
       if (active.id === "player-close") target = code === 39 ? toggle : code === 40 ? document.getElementById("overlay-favorite") : active;
       else if (active === toggle) target = code === 37 ? document.getElementById("player-close") : code === 40 ? (state.commentsHidden ? document.getElementById("overlay-favorite") : commentEntry) : active;
-      else if (active.id === "overlay-favorite") target = code === 40 ? document.getElementById("overlay-seek") : code === 39 ? commentEntry : code === 38 ? document.getElementById("player-close") : active;
+      else if (active.id === "overlay-favorite") target = code === 40 ? document.getElementById("overlay-seek") : code === 39 ? document.getElementById("overlay-artist-info") : code === 38 ? document.getElementById("player-close") : active;
+      else if (active.id === "overlay-artist-info") target = code === 37 ? document.getElementById("overlay-favorite") : code === 40 ? document.getElementById("overlay-seek") : code === 39 ? commentEntry : code === 38 ? document.getElementById("player-close") : active;
       else if (comments.contains(active) || active === comments) {
         if (comment && (code === 38 || code === 40)) { var commentRect = rectOf(comment), viewRect = rectOf(comments), oldTop = comments.scrollTop; if (code === 40 && commentRect.bottom > viewRect.bottom - 8) comments.scrollTop += Math.min(comments.clientHeight * .45, commentRect.bottom - viewRect.bottom + 8); else if (code === 38 && commentRect.top < viewRect.top + 8) comments.scrollTop -= Math.min(comments.clientHeight * .45, viewRect.top + 8 - commentRect.top); if (comments.scrollTop !== oldTop) return true; }
         if (code === 37) target = document.getElementById(focusMemory.overlayControl);
@@ -410,7 +411,6 @@
     else actions += queueTrackAction(song);
     if (state.page === "favorites") actions += trackAction("remove-favorite", "delete", "从收藏删除");
     else actions += trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
-    actions += trackAction("artist-album", "artist-info", "查看歌手和专辑详情");
     return songRowMarkup(song, index, actions, false);
   }
   function songRowMarkup(song, index, actions, queueView) {
@@ -934,7 +934,7 @@
     return '<svg ' + attrs + '><path class="play-triangle" d="m9 5 10 7-10 7V5Z"/></svg>';
   }
   function setControlIcon(id, name, label) { var button = document.getElementById(id); if (!button) return; if (button.getAttribute("data-control-icon") !== name) { button.innerHTML = controlIcon(name); button.setAttribute("data-control-icon", name); } if (label && button.getAttribute("aria-label") !== label) { button.title = label; button.setAttribute("aria-label", label); } }
-  function renderControlIcons() { setControlIcon("player-close", "close", "返回"); setControlIcon("prev", "prev", "上一首"); setControlIcon("play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("next", "next", "下一首"); renderQueueButton(); setControlIcon("overlay-prev", "prev", "上一首"); setControlIcon("overlay-play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("overlay-next", "next", "下一首"); setControlIcon("overlay-queue", "queue", "播放列表"); renderOverlayFavorite(); }
+  function renderControlIcons() { setControlIcon("player-close", "close", "返回"); setControlIcon("prev", "prev", "上一首"); setControlIcon("play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("next", "next", "下一首"); renderQueueButton(); setControlIcon("overlay-prev", "prev", "上一首"); setControlIcon("overlay-play", playbackPaused() ? "play" : "pause", playbackPaused() ? "播放" : "暂停"); setControlIcon("overlay-next", "next", "下一首"); setControlIcon("overlay-queue", "queue", "播放列表"); setControlIcon("overlay-artist-info", "artist-info", "查看歌手和专辑详情"); renderOverlayFavorite(); }
   function renderOverlayFavorite() {
     var button = document.getElementById("overlay-favorite"), selected = isFavorite(state.current), label = selected ? "取消收藏" : "收藏歌曲";
     if (!button) return;
@@ -1160,7 +1160,6 @@
       actions = trackAction("artist-info", "artist-info", "查看歌手和专辑详情");
       actions += state.playbackListSource === "queue" ? trackAction("remove-queue", "delete", "从播放列表删除") : queueTrackAction(song);
       actions += trackAction("favorite", "favorite", favorite ? "取消收藏" : "收藏歌曲", favorite);
-      actions += trackAction("artist-album", "artist-info", "查看歌手和专辑详情");
       html += songRowMarkup(song, i, actions, true);
     }
     return html || (queueLoading.data ? '<div class="queue-list-loading" role="status"><span class="loading-ring" aria-hidden="true"></span><span>正在加载播放列表…</span></div>' : '<div class="state">播放列表为空</div>');
@@ -1434,6 +1433,7 @@
   document.getElementById("overlay-next").addEventListener("click", function () { playRelative(1); });
   document.getElementById("overlay-queue").addEventListener("click", openQueuePopup);
   document.getElementById("overlay-favorite").addEventListener("click", function () { toggleFavorite(state.current); });
+  document.getElementById("overlay-artist-info").addEventListener("click", function () { if (state.current) openShareMenu(state.current); });
   document.getElementById("overlay-play").addEventListener("click", togglePlayback);
   document.getElementById("prev").addEventListener("click", function () { playRelative(-1); });
   document.getElementById("next").addEventListener("click", function () { playRelative(1); });
