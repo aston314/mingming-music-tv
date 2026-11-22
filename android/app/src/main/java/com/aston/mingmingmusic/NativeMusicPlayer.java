@@ -303,10 +303,12 @@ final class NativeMusicPlayer {
     private PendingIntent action(String name, int code) {
         return PendingIntent.getService(service, code, new Intent(service, CoreService.class).setAction(name), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
-    private void updateNotification() {
-        String title = track.optString("name", track.optString("title", "明明音乐")), artist = track.optString("artist", "");
-        JSONArray artists = track.optJSONArray("ar");
-        if (artists == null) artists = track.optJSONArray("artists");
+    void startForegroundIdle() { if (!foreground) updateNotification(true); }
+    private void updateNotification() { updateNotification(false); }
+    private void updateNotification(boolean forceForeground) {
+        String title = track == null ? "明明音乐" : track.optString("name", track.optString("title", "明明音乐")), artist = track == null ? "准备播放" : track.optString("artist", "");
+        JSONArray artists = track == null ? null : track.optJSONArray("ar");
+        if (artists == null && track != null) artists = track.optJSONArray("artists");
         if (artist.isEmpty() && artists != null && artists.length() > 0) artist = artists.optJSONObject(0) == null ? artists.optString(0) : artists.optJSONObject(0).optString("name");
         session.setMetadata(new MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, artist).putLong(MediaMetadata.METADATA_KEY_DURATION, (long) (duration * 1000)).build());
@@ -321,7 +323,7 @@ final class NativeMusicPlayer {
                 .addAction(android.R.drawable.ic_media_next, "下一首", action("next", 3))
                 .setDeleteIntent(action("stop", 4))
                 .setStyle(new Notification.MediaStyle().setMediaSession(session.getSessionToken()).setShowActionsInCompactView(0, 1, 2)).build();
-        if (wantPlay && !foreground) { service.startForeground(NOTIFICATION, note); foreground = true; }
+        if ((wantPlay || forceForeground) && !foreground) { service.startForeground(NOTIFICATION, note); foreground = true; }
         else {
             if (!wantPlay && foreground) { service.stopForeground(false); foreground = false; }
             manager.notify(NOTIFICATION, note);

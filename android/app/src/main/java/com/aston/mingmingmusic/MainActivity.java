@@ -7,6 +7,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.KeyEvent;
@@ -41,7 +42,7 @@ public final class MainActivity extends Activity {
         startup = new StartupView(this, new Runnable() { @Override public void run() { restartStartup(); } });
         root.addView(startup, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
-        startService(new Intent(this, CoreService.class));
+        startCoreService();
         waitForCore();
     }
     private void immersive() { getWindow().getDecorView().setSystemUiVisibility(5894); }
@@ -53,7 +54,7 @@ public final class MainActivity extends Activity {
             web.requestFocus();
             web.evaluateJavascript("window.MingmingTVForeground&&window.MingmingTVForeground()", null);
         } else if (!destroyed && !ready) {
-            startService(new Intent(this, CoreService.class));
+            startCoreService();
             waitForCore();
         }
     }
@@ -61,8 +62,12 @@ public final class MainActivity extends Activity {
         ready = false;
         if (web != null) { root.removeView(web); web.destroy(); web = null; }
         startup.setVisibility(View.VISIBLE); startup.setStatus("正在准备音乐服务", true);
-        startService(new Intent(this, CoreService.class));
+        startCoreService();
         waitForCore();
+    }
+    private void startCoreService() {
+        Intent intent = new Intent(this, CoreService.class);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
     }
     private void waitForCore() {
         final int generation = ++startupGeneration;

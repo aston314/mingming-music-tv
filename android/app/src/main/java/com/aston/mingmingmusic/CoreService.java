@@ -3,6 +3,7 @@ package com.aston.mingmingmusic;
 import android.app.Service;
 import android.content.Intent;
 import android.os.IBinder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -25,7 +26,7 @@ public final class CoreService extends Service {
     }
     static void backgroundPlayback() { final CoreService current = instance; if (current != null) current.main.post(new Runnable() { @Override public void run() { if (current.music != null) current.music.background(); } }); }
     static void exitPlayback() { final CoreService current = instance; if (current != null) current.main.post(new Runnable() { @Override public void run() { if (current.music != null) current.music.exit(); else current.stopSelf(); } }); }
-    @Override public void onCreate() { super.onCreate(); music = new NativeMusicPlayer(this); instance = this; }
+    @Override public void onCreate() { super.onCreate(); music = new NativeMusicPlayer(this); instance = this; if (Build.VERSION.SDK_INT >= 26) music.startForegroundIdle(); }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         startCore();
         if (intent != null && intent.getAction() != null) {
