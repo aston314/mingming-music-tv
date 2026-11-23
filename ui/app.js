@@ -1164,8 +1164,8 @@
   }
   function loadLyricsComments(song, token) {
     var id = encodeURIComponent(song.id || "");
-    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderPlayerOverlay(); });
-    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderPlayerOverlay(); updateLyrics(playbackPosition(), true); });
+    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderPlayerOverlay(); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); });
+    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderPlayerOverlay(); updateLyrics(playbackPosition(), true); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); });
     state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; loadCommentsPage(0, token);
   }
   function playbackItems() {
