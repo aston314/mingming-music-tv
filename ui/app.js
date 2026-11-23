@@ -305,7 +305,7 @@
     next = index + (code === 40 ? 1 : -1);
     if (rows[next]) return rows[next];
     if (state.queueOpen) return code === 38 ? document.getElementById("queue-popup-close") : active;
-    if (code === 40) { focusMemory.footerReturn = bookmark(content); return document.getElementById("seek"); }
+    if (code === 40) { focusMemory.footerReturn = bookmark(content); return document.getElementById("now-playing"); }
     return nearestFocus(code, row, Array.prototype.filter.call(content.querySelectorAll(".focusable:not(.track-row):not(.track-action)"), isFocusable)) || row;
   }
   function albumCardFocus(code, active) {
@@ -328,7 +328,7 @@
         if (!state.playerOpen && code === 39 && active.id === "next") target = document.getElementById("seek");
         else if (state.playerOpen && code === 39 && index === ids.length - 1) target = commentEntry;
         else target = document.getElementById(ids[Math.max(0, Math.min(ids.length - 1, index + (code === 39 ? 1 : -1)))]);
-      } else if (code === 38) target = active.id === "now-playing" ? resolveBookmark(content, focusMemory.footerReturn) || contentEntry() : document.getElementById(state.playerOpen ? "overlay-seek" : "seek");
+      } else if (code === 38) target = active.id === "now-playing" ? resolveBookmark(content, focusMemory.footerReturn) || contentEntry() : state.playerOpen ? document.getElementById("overlay-seek") : resolveBookmark(content, focusMemory.footerReturn) || contentEntry();
       else if (code === 40) target = active;
       else return false;
     } else if (state.playerOpen) {
@@ -380,7 +380,7 @@
       target = albumCardFocus(code, active) || trackCardFocus(code, active) || nearestFocus(code, active, Array.prototype.filter.call(content.querySelectorAll(".focusable:not(.track-action)"), isFocusable));
       if (!target && code === 37) target = activeNav();
       if (!target && code === 39) target = active;
-      if (!target && code === 40) { focusMemory.footerReturn = bookmark(content); target = document.getElementById("seek"); }
+      if (!target && code === 40) { focusMemory.footerReturn = bookmark(content); target = document.getElementById("now-playing"); }
     }
     focusTarget(target || active);
   }
