@@ -175,7 +175,10 @@
     playback.resolving = data.state === "preparing";
     playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
     setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); renderQueueButton();
-    shouldSyncTicker = data.state !== "playing" || oldStatus !== "playing" || Math.abs(playback.position - oldPosition) > .75;
+    // Lyrics may arrive after playback has already entered the playing state.
+    // Restart the ticker whenever no frame is scheduled, otherwise the first
+    // async word-lyric response can leave the fullscreen lyrics frozen.
+    shouldSyncTicker = data.state !== "playing" || oldStatus !== "playing" || Math.abs(playback.position - oldPosition) > .75 || lyricMotion.frame === null;
     if (data.state === "playing" && shouldSyncTicker) syncLyricTicker(playback.position);
     if (oldDuration !== playback.duration) updateTrackStates();
     return true;
