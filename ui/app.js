@@ -906,8 +906,8 @@
     track.style.transition = "none"; track.style.webkitTransition = "none";
   }
   function lyricTickerAllowed() {
-    var modal = document.getElementById("modal-root");
-    return state.playerOpen && state.current && state.lyricLines.length && state.playbackStatus === "playing" && !playbackPaused() && !document.hidden && !commentMotion.background && !state.queueOpen && modal && modal.hidden;
+    var modal = document.getElementById("modal-root"), nativePlaying = nativePlayer && playback.wantPlay && playback.sourceReady, playing = state.playbackStatus === "playing" || nativePlaying;
+    return state.playerOpen && state.current && state.lyricLines.length && playing && !playbackPaused() && !document.hidden && !state.queueOpen && modal && modal.hidden;
   }
   function stopLyricTicker() {
     if (lyricMotion.frame !== null) cancelFrame(lyricMotion.frame);
