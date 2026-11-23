@@ -49,6 +49,10 @@ const {chromium} = require('playwright');
       await require('../tests/focus-performance-browser.cjs')({browser, url});
       return;
     }
+    if (process.argv.includes('--lyric-clock-only')) {
+      await require('../tests/lyric-clock-browser.cjs')({browser, url});
+      return;
+    }
     const context = await browser.newContext({viewport: {width: 1920, height: 1080}});
     const page = await context.newPage();
     const harness = fs.readFileSync('tests/focus-browser.js', 'utf8');
@@ -125,6 +129,7 @@ const {chromium} = require('playwright');
     await require('../tests/queue-loading-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/comments-visibility-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/four-line-lyrics-browser.cjs')({browser, url, screenshotsDir: scratch});
+    await require('../tests/lyric-clock-browser.cjs')({browser, url});
     await require('../tests/android6-player-browser.cjs')({browser, url, screenshotsDir: scratch});
     await require('../tests/focus-performance-browser.cjs')({browser, url});
     await require('../tests/phone-login-browser.cjs')({browser, url});

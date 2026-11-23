@@ -56,7 +56,7 @@ final class NativeMusicPlayer {
     private String errorKind = "";
     private int errorCode;
     private double position, duration;
-    private long generation, sequence, lastSave, selectionTag;
+    private long generation, sequence, lastSave, selectionTag, positionAt;
     private int sourceRetryCount, autoSkipCount;
     private boolean ready, resolving, wantPlay, replacing, released, foreground, exiting;
     private volatile String published = "{}";
@@ -157,6 +157,7 @@ final class NativeMusicPlayer {
         list = value.optJSONArray("list") == null ? new JSONArray() : value.getJSONArray("list");
         mode = value.optString("mode", "list"); listSource = value.optString("listSource", "");
         position = Math.max(0, value.optDouble("position", 0));
+        positionAt = System.currentTimeMillis();
         duration = Math.max(0, value.optDouble("duration", track.optDouble("dt", 0) / 1000));
         publish("paused"); checkpoint(null);
     }
@@ -239,6 +240,7 @@ final class NativeMusicPlayer {
     private void seek(double seconds) {
         if (Double.isNaN(seconds) || Double.isInfinite(seconds)) return;
         position = Math.max(0, duration > 0 ? Math.min(seconds, duration) : seconds);
+        positionAt = System.currentTimeMillis();
         if (player.getMediaItemCount() > 0) player.seekTo((long) (position * 1000));
         refresh(); checkpoint(null);
     }
@@ -265,6 +267,7 @@ final class NativeMusicPlayer {
     private void capture() {
         if (ready) {
             position = Math.max(0, player.getCurrentPosition() / 1000d);
+            positionAt = System.currentTimeMillis();
             long total = player.getDuration();
             if (total != C.TIME_UNSET && total > 0) duration = total / 1000d;
         }
@@ -286,7 +289,7 @@ final class NativeMusicPlayer {
         try {
             published = new JSONObject().put("snapshot", track == null ? JSONObject.NULL : snapshot())
                     .put("state", status).put("ready", ready).put("wantPlay", wantPlay)
-                    .put("generation", generation).put("selectionTag", selectionTag)
+                    .put("generation", generation).put("positionAt", positionAt).put("selectionTag", selectionTag)
                     .put("errorKind", errorKind.isEmpty() ? JSONObject.NULL : errorKind)
                     .put("errorCode", errorCode == 0 ? JSONObject.NULL : errorCode)
                     .put("sourceRetryCount", sourceRetryCount).toString();

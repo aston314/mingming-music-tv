@@ -89,7 +89,7 @@
   var nativeApp = !!(window.MingmingTVApp || nativePlayer);
   var nativeSelection = 0, nativePendingSelection = 0, settingsUpdateTimer = null;
   var commentMotion = {frame: null, last: 0, position: 0, scroll: 0, background: false, holdUntil: 0};
-  var lyricMotion = {frame: null, base: 0, at: 0, wordTime: -1};
+  var lyricMotion = {frame: null, lastFrameAt: 0, wordTime: -1};
   var commentView = {token: -1, count: 0};
   var overlayLyricView = {lines: null, message: null, four: false, width: 0, height: 0, index: -1, time: null, measure: null};
   var lyricActiveNode = null;
@@ -135,10 +135,25 @@
   var progressView = {percent: null, elapsed: null, duration: null};
   var libraryWrite = {inFlight: false, pending: false, revision: 0, callbacks: []};
   var queueLoading = {data: 0, covers: 0, token: 0};
-  var playback = {position: 0, duration: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false, errorKind: "", errorCode: 0, autoSkipCount: 0};
+  // Native playback positions are samples. positionAt lets the lyric clock
+  // extrapolate between samples instead of waiting for the 500ms bridge poll.
+  var playback = {position: 0, duration: 0, positionAt: 0, generation: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false, errorKind: "", errorCode: 0, autoSkipCount: 0};
   var playbackWrite = {clientId: String(Date.now()) + "-" + String(Math.random()).slice(2), sequence: 0, revision: 0, inFlight: false, pending: null, lastSave: 0};
   function playbackPaused() { return nativePlayer ? !playback.wantPlay : audio.paused; }
-  function playbackPosition() { return nativePlayer ? playback.position : playback.pendingSeek != null ? playback.pendingSeek : (playback.sourceReady ? (audio.currentTime || 0) : playback.position); }
+  function playbackPosition() {
+    var position, elapsed;
+    if (!nativePlayer) return playback.pendingSeek != null ? playback.pendingSeek : (playback.sourceReady ? (audio.currentTime || 0) : playback.position);
+    position = Number(playback.position) || 0;
+    // The service samples ExoPlayer and records the wall-clock time of that
+    // sample. Keep the visual clock moving between bridge snapshots. The
+    // bound prevents a stale foreground snapshot from jumping across a long
+    // background interval; the next native sample re-anchors it.
+    if (state.playbackStatus === "playing" && playback.wantPlay && playback.positionAt > 0) {
+      elapsed = (Date.now() - playback.positionAt) / 1000;
+      if (elapsed > 0) position += Math.min(2.5, elapsed);
+    }
+    return playback.duration > 0 ? Math.min(playback.duration, Math.max(0, position)) : Math.max(0, position);
+  }
   function playbackDuration() { return !nativePlayer && playback.sourceReady && isFinite(audio.duration) && audio.duration > 0 ? audio.duration : playback.duration; }
   function snapshotTrack(song) {
     var copy = {}, keys = ["id", "name", "title", "mainTitle", "artist", "album", "type", "provider", "source", "picUrl", "coverPath", "image", "pic", "pic_id", "dt", "duration", "interval", "time", "ar", "artists", "al"], i;
@@ -170,11 +185,11 @@
     changed = !state.current || !sameSong(state.current, saved.track);
     state.playMode = saved.mode || "list"; state.playbackList = saved.list || []; state.playbackListSource = saved.listSource || "";
     if (changed) { selectTrack(saved.track, saved.position, saved.duration, true); rememberRecent(saved.track); }
-    playback.position = saved.position || 0; playback.duration = saved.duration || 0; playback.pendingSeek = null;
+    playback.position = saved.position || 0; playback.duration = saved.duration || 0; playback.positionAt = Number(data.positionAt) || 0; playback.generation = Number(data.generation) || 0; playback.pendingSeek = null;
     playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
     playback.resolving = data.state === "preparing";
     playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
-    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); syncLyricTicker(playback.position); renderQueueButton();
+    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playbackPosition()); syncLyricTicker(); renderQueueButton();
     if (oldDuration !== playback.duration) updateTrackStates();
     return true;
   }
@@ -907,21 +922,32 @@
   function stopLyricTicker() {
     if (lyricMotion.frame !== null) cancelFrame(lyricMotion.frame);
     lyricMotion.frame = null;
+    lyricMotion.lastFrameAt = 0;
   }
-  function syncLyricTicker(position) {
+  function lyricWordIsActive(time) {
+    var line = state.lyricIndex >= 0 ? state.lyricLines[state.lyricIndex] : null, words = line && line.words, i, word;
+    if (!words || !words.length) return false;
+    for (i = 0; i < words.length; i++) {
+      word = words[i];
+      if (time >= word.time && time < word.end) return true;
+    }
+    return false;
+  }
+  function syncLyricTicker(force) {
     if (!lyricTickerAllowed()) { stopLyricTicker(); return; }
-    lyricMotion.base = typeof position === "number" ? position : playbackPosition();
-    lyricMotion.at = lyricClockNow();
-    if (lyricMotion.frame === null) lyricMotion.frame = requestFrame(runLyricTicker);
+    if (force) lyricMotion.lastFrameAt = 0;
+    if (lyricMotion.frame === null && lyricWordIsActive(playbackPosition())) lyricMotion.frame = requestFrame(runLyricTicker);
   }
   function runLyricTicker() {
-    var now, time, duration;
+    var now, time;
     lyricMotion.frame = null;
     if (!lyricTickerAllowed()) return;
-    now = lyricClockNow(); time = lyricMotion.base + Math.max(0, Math.min(1.5, (now - lyricMotion.at) / 1000));
-    duration = playbackDuration(); if (duration > 0) time = Math.min(duration, time);
+    now = lyricClockNow();
+    if (lyricMotion.lastFrameAt && now - lyricMotion.lastFrameAt < 40) { lyricMotion.frame = requestFrame(runLyricTicker); return; }
+    lyricMotion.lastFrameAt = now;
+    time = playbackPosition();
     updateLyrics(time, false);
-    if (lyricTickerAllowed()) lyricMotion.frame = requestFrame(runLyricTicker);
+    if (lyricTickerAllowed() && lyricWordIsActive(time)) lyricMotion.frame = requestFrame(runLyricTicker);
   }
   function loadMoreComments(root) {
     if (!root || !state.playerOpen || state.commentsHidden || root.clientHeight <= 0 || state.commentsLoading || Date.now() < state.commentsRetryAt) return;
@@ -1176,7 +1202,7 @@
   function selectTrack(song, position, duration, fromNative) {
     stopLyricTicker(); stopLyricMotion();
     if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
-    playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
+    playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.positionAt = 0; playback.generation = 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
     state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.lyricsWordLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
     document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderPlayerOverlay(); syncProgress();
     loadLyricsComments(song, state.playToken);
@@ -1225,7 +1251,7 @@
     playback.resolving = false; playback.needsSource = false; playback.sourceReady = false; playback.errorKind = ""; playback.errorCode = 0;
     setPlaybackStatus(playback.wantPlay ? "preparing" : "paused"); audio.src = "/media?url=" + encodeURIComponent(source); audio.load();
   }
-  function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), play; if (!overlay || state.playerOpen) return; state.commentsHidden = readPreference("mingming.commentDefault", "show") === "hide"; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); syncLyricTicker(playbackPosition()); play = document.getElementById("overlay-play"); if (play) play.focus(); }
+  function openPlayerOverlay() { var overlay = document.getElementById("player-overlay"), play; if (!overlay || state.playerOpen) return; state.commentsHidden = readPreference("mingming.commentDefault", "show") === "hide"; state.playerPreviousFocus = document.activeElement; state.playerOpen = true; overlay.hidden = false; renderPlayerOverlay(); syncLyricTicker(true); play = document.getElementById("overlay-play"); if (play) play.focus(); }
   function queuePopupMarkup(items) {
     var html = "", i, song, actions, favorite;
     for (i = 0; i < items.length; i++) {
@@ -1468,7 +1494,7 @@
   }
   window.MingmingTVBack = handleBack;
   window.MingmingTVBackground = function () { savePlayback(true); commentMotion.background = true; stopCommentMotion(); stopLyricTicker(); stopLyricMotion(); if (state.scan) closeScan(); };
-  window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); syncCommentMotion(); };
+  window.MingmingTVForeground = function () { commentMotion.background = false; refreshNativePlayback(); if (state.playbackStatus === "playing") syncLyricTicker(true); syncCommentMotion(); };
   document.addEventListener("visibilitychange", function () { if (document.hidden) window.MingmingTVBackground(); else window.MingmingTVForeground(); });
   window.addEventListener("pageshow", window.MingmingTVForeground);
   window.addEventListener("resize", function () { refreshViewport(); syncCommentMotion(); updateLyrics(playbackPosition(), true); });
@@ -1516,11 +1542,11 @@
     if (!isFinite(time) || !duration) return;
     stopLyricTicker(); stopLyricMotion();
     time = Math.max(0, Math.min(duration, time));
-    playback.position = time;
+    playback.position = time; playback.positionAt = Date.now();
     if (nativePlayer) { nativePlayer.command("seek", String(time)); playback.pendingSeek = null; }
     else if (playback.sourceReady) audio.currentTime = time; else playback.pendingSeek = time;
     syncProgress(time); updateLyrics(time, true); savePlayback();
-    if (state.playbackStatus === "playing") syncLyricTicker(time);
+    if (state.playbackStatus === "playing") syncLyricTicker(true);
   }
   function finishSeek() {
     var input = state.seekInput, time;
@@ -1561,7 +1587,7 @@
     if (progressView.elapsed !== elapsed) { document.getElementById("player-elapsed").textContent = elapsed; document.getElementById("overlay-elapsed").textContent = elapsed; progressView.elapsed = elapsed; }
     if (progressView.duration !== duration) { document.getElementById("player-duration").textContent = duration; document.getElementById("overlay-duration").textContent = duration; progressView.duration = duration; }
   }
-  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status, visualPlaying = (status === "playing" || status === "buffering" || status === "preparing") && playback.wantPlay, label; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(visualPlaying); if (status !== "playing") { stopLyricTicker(); if (changed) stopLyricMotion(); } else if (changed || lyricMotion.frame === null) syncLyricTicker(playbackPosition()); if (changed) updateTrackStates(); label = document.getElementById("lyric-status"); if (label) { if (status === "failed") { label.textContent = playbackErrorText(); label.hidden = false; } else if (!label.hidden) label.hidden = true; } syncCommentMotion(); }
+  function setPlaybackStatus(status) { var changed = state.playbackStatus !== status, visualPlaying = (status === "playing" || status === "buffering" || status === "preparing") && playback.wantPlay, label; state.playbackStatus = status; setPlaybackButtonState(!playbackPaused() && status !== "failed" && status !== "ended"); syncPlaybackVisuals(visualPlaying); if (status !== "playing") { stopLyricTicker(); if (changed) stopLyricMotion(); } else if (changed || lyricMotion.frame === null) syncLyricTicker(!!changed); if (changed) updateTrackStates(); label = document.getElementById("lyric-status"); if (label) { if (status === "failed") { label.textContent = playbackErrorText(); label.hidden = false; } else if (!label.hidden) label.hidden = true; } syncCommentMotion(); }
   audio.addEventListener("play", function () { setPlaybackStatus("preparing"); });
   audio.addEventListener("playing", function () { setPlaybackStatus("playing"); savePlayback(); });
   audio.addEventListener("waiting", function () { setPlaybackStatus(audio.paused ? "paused" : "buffering"); });
@@ -1577,9 +1603,12 @@
   });
   function mediaCanSeek() { if (!playback.sourceReady) return; applyPendingSeek(); if (playback.wantPlay && audio.paused) startAudio(); }
   audio.addEventListener("canplay", mediaCanSeek); audio.addEventListener("progress", mediaCanSeek);
-  audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(playbackPosition()); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); if (playback.sourceReady && !audio.paused && Date.now() - playbackWrite.lastSave >= 5000) savePlayback(); });
+  audio.addEventListener("timeupdate", function () { syncProgress(); updateLyrics(playbackPosition()); if (state.playbackStatus === "playing") syncLyricTicker(); if (playback.sourceReady && !audio.paused && Date.now() - playbackWrite.lastSave >= 5000) savePlayback(); });
   audio.addEventListener("ended", function () { setPlaybackStatus("ended"); handleEnded(); });
   if (nativePlayer) window.setInterval(function () { if (!commentMotion.background && !document.hidden) refreshNativePlayback(); }, 500);
+  // Keep the line clock alive when an old WebView emits sparse timeupdate
+  // events, while requestAnimationFrame is reserved for an active timed word.
+  window.setInterval(function () { if (!document.hidden && state.playerOpen) { syncProgress(); updateLyrics(playbackPosition()); if (state.playbackStatus === "playing") syncLyricTicker(); } }, 100);
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
   document.addEventListener("keydown", function (e) { if (e.keyCode === 27 || e.keyCode === 4) { if (handleBack()) e.preventDefault(); return; } if (e.keyCode === 37 || e.keyCode === 38 || e.keyCode === 39 || e.keyCode === 40 || e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 66) { e.preventDefault(); moveFocus(e.keyCode); } });
 
