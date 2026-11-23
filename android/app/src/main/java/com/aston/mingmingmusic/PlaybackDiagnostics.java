@@ -22,8 +22,7 @@ final class PlaybackDiagnostics {
         return errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
                 || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
                 || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_INIT_FAILED
-                || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_WRITE_FAILED
-                || errorCode == PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED;
+                || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_WRITE_FAILED;
     }
 
     static String kind(int errorCode) {
