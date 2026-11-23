@@ -161,7 +161,7 @@
   }
   function nativeSnapshot() { return {schema: 1, track: snapshotTrack(state.current), position: playback.position, duration: playback.duration, mode: state.playMode, list: playbackItems().slice(0, 500).map(snapshotTrack), listSource: state.playbackListSource, selectionTag: nativePendingSelection}; }
   function refreshNativePlayback() {
-    var data, saved, changed, oldDuration = playback.duration;
+    var data, saved, changed, oldDuration = playback.duration, oldPosition = playback.position, oldStatus = state.playbackStatus, shouldSyncTicker;
     if (!nativePlayer) return false;
     try { data = JSON.parse(nativePlayer.read()); } catch (ignore) { return false; }
     saved = data && data.snapshot;
@@ -174,7 +174,9 @@
     playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
     playback.resolving = data.state === "preparing";
     playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
-    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); syncLyricTicker(playback.position); renderQueueButton();
+    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); renderQueueButton();
+    shouldSyncTicker = data.state !== "playing" || oldStatus !== "playing" || Math.abs(playback.position - oldPosition) > .75;
+    if (data.state === "playing" && shouldSyncTicker) syncLyricTicker(playback.position);
     if (oldDuration !== playback.duration) updateTrackStates();
     return true;
   }
