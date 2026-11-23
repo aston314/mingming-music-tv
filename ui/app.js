@@ -1087,6 +1087,7 @@
     if (playback.errorKind === "network") return "播放源网络异常，请稍后重试";
     if (playback.errorKind === "source") return "播放源返回异常，可能是试听或链接已失效";
     if (playback.errorKind === "decode") return "设备不支持此音频格式";
+    if (playback.errorKind === "device") return "设备音频输出暂不可用，请暂停其它播放器后重试";
     if (playback.errorKind === "resolver") return "播放地址获取失败";
     return "播放失败，请重试";
   }

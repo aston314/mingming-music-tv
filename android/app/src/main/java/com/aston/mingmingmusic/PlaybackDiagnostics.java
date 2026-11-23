@@ -17,6 +17,15 @@ final class PlaybackDiagnostics {
                 || errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE;
     }
 
+    /** These failures belong to the device audio pipeline, not to a song URL. */
+    static boolean isDeviceAudioFailure(int errorCode) {
+        return errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
+                || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
+                || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_INIT_FAILED
+                || errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_WRITE_FAILED
+                || errorCode == PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED;
+    }
+
     static String kind(int errorCode) {
         if (errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
                 || errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT) {
@@ -28,6 +37,9 @@ final class PlaybackDiagnostics {
         }
         if (errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED) {
             return "decode";
+        }
+        if (isDeviceAudioFailure(errorCode)) {
+            return "device";
         }
         return "unknown";
     }

@@ -111,6 +111,14 @@ final class NativeMusicPlayer {
                     } }, 500L + (sourceRetryCount * 350L));
                     return;
                 }
+                // An AudioTrack/decoder resource failure is local to the
+                // device. Skipping through the queue cannot repair it and
+                // creates the appearance of continuous automatic song changes.
+                if (PlaybackDiagnostics.isDeviceAudioFailure(error.errorCode)) {
+                    wantPlay = false;
+                    publish("failed"); checkpoint(null);
+                    return;
+                }
                 if (continueAfterFailure()) return;
                 wantPlay = false;
                 publish("failed"); checkpoint(null);
