@@ -161,7 +161,7 @@
   }
   function nativeSnapshot() { return {schema: 1, track: snapshotTrack(state.current), position: playback.position, duration: playback.duration, mode: state.playMode, list: playbackItems().slice(0, 500).map(snapshotTrack), listSource: state.playbackListSource, selectionTag: nativePendingSelection}; }
   function refreshNativePlayback() {
-    var data, saved, changed, oldDuration = playback.duration, oldPosition = playback.position, oldStatus = state.playbackStatus, shouldSyncTicker;
+    var data, saved, changed, oldDuration = playback.duration;
     if (!nativePlayer) return false;
     try { data = JSON.parse(nativePlayer.read()); } catch (ignore) { return false; }
     saved = data && data.snapshot;
@@ -174,12 +174,7 @@
     playback.sourceReady = !!data.ready; playback.needsSource = !data.ready; playback.wantPlay = !!data.wantPlay;
     playback.resolving = data.state === "preparing";
     playback.errorKind = data.errorKind || ""; playback.errorCode = Number(data.errorCode) || 0;
-    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); renderQueueButton();
-    // Lyrics may arrive after playback has already entered the playing state.
-    // Restart the ticker whenever no frame is scheduled, otherwise the first
-    // async word-lyric response can leave the fullscreen lyrics frozen.
-    shouldSyncTicker = data.state !== "playing" || oldStatus !== "playing" || Math.abs(playback.position - oldPosition) > .75 || lyricMotion.frame === null;
-    if (data.state === "playing" && shouldSyncTicker) syncLyricTicker(playback.position);
+    setPlaybackStatus(data.state || "paused"); renderPlayMode(); syncProgress(); updateLyrics(playback.position); syncLyricTicker(playback.position); renderQueueButton();
     if (oldDuration !== playback.duration) updateTrackStates();
     return true;
   }
@@ -906,8 +901,8 @@
     track.style.transition = "none"; track.style.webkitTransition = "none";
   }
   function lyricTickerAllowed() {
-    var modal = document.getElementById("modal-root"), nativePlaying = nativePlayer && playback.wantPlay && playback.sourceReady, playing = state.playbackStatus === "playing" || nativePlaying;
-    return state.playerOpen && state.current && state.lyricLines.length && playing && !playbackPaused() && !document.hidden && !state.queueOpen && modal && modal.hidden;
+    var modal = document.getElementById("modal-root");
+    return state.playerOpen && state.current && state.lyricLines.length && state.playbackStatus === "playing" && !playbackPaused() && !document.hidden && !commentMotion.background && !state.queueOpen && modal && modal.hidden;
   }
   function stopLyricTicker() {
     if (lyricMotion.frame !== null) cancelFrame(lyricMotion.frame);
@@ -1164,8 +1159,8 @@
   }
   function loadLyricsComments(song, token) {
     var id = encodeURIComponent(song.id || "");
-    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderPlayerOverlay(); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); });
-    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderPlayerOverlay(); updateLyrics(playbackPosition(), true); if (state.playbackStatus === "playing") syncLyricTicker(playbackPosition()); });
+    api("/api/music/lrc", "POST", "id=" + id + "&type=wy", function (err, data) { var raw = !err && data && data.data || "", text = err ? "歌词暂不可用" : (raw || "暂无歌词"); if (token !== state.playToken) return; state.lyricsLoaded = true; state.lyricsText = text; if (!state.lyricsWordLoaded) state.lyricLines = parseLyrics(raw); state.lyricIndex = -1; renderPlayerOverlay(); });
+    api("/api/word-lyric?id=" + id, "GET", null, function (err, data) { var enhanced = err ? [] : parseWordLyrics(data); if (token !== state.playToken || !enhanced.length) return; state.lyricsWordLoaded = true; state.lyricLines = enhanced; state.lyricIndex = -1; renderPlayerOverlay(); updateLyrics(playbackPosition(), true); });
     state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; loadCommentsPage(0, token);
   }
   function playbackItems() {
