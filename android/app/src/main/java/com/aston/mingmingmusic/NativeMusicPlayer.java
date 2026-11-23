@@ -12,6 +12,7 @@ import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
@@ -37,6 +38,7 @@ import java.util.concurrent.Executors;
 /** Service owns audio, audio focus, queue continuation and checkpoints. The page only renders. */
 @android.annotation.SuppressLint("UnsafeOptInUsageError")
 final class NativeMusicPlayer {
+    private static final String TAG = "MingmingMusic";
     private static final String CHANNEL = "music-playback";
     private static final int NOTIFICATION = 7;
     private final CoreService service;
@@ -106,7 +108,7 @@ final class NativeMusicPlayer {
                     publish("preparing");
                     main.postDelayed(new Runnable() { @Override public void run() {
                         if (!released && !exiting && track != null && wantPlay) play();
-                    } }, 350);
+                    } }, 500L + (sourceRetryCount * 350L));
                     return;
                 }
                 if (continueAfterFailure()) return;
@@ -181,26 +183,29 @@ final class NativeMusicPlayer {
         final CoreEndpoint endpoint = CoreService.endpoint();
         resolver.execute(new Runnable() { @Override public void run() {
             String source = null;
-            Exception resolverFailure = null;
+            boolean resolverTransportFailure = false;
             try {
                 if (endpoint == null) throw new IllegalStateException("core unavailable");
                 String form = "id=" + URLEncoder.encode(selected.optString("id"), "UTF-8") + "&type="
                         + URLEncoder.encode(selected.optString("type", selected.optString("provider", "wy")), "UTF-8");
                 for (int attempt = 0; attempt <= PlaybackDiagnostics.MAX_SOURCE_RETRIES; attempt++) {
                     try {
-                        source = new JSONObject(request(endpoint.url + "api/music/url", "POST", form, "application/x-www-form-urlencoded")).optString("data");
-                        resolverFailure = null;
+                        JSONObject response = new JSONObject(request(endpoint.url + "api/music/url", "POST", form, "application/x-www-form-urlencoded"));
+                        String candidate = response.optString("data").trim();
+                        if (!(candidate.startsWith("http://") || candidate.startsWith("https://"))) throw new IllegalStateException("resolver returned no playable URL");
+                        source = candidate;
                         break;
                     } catch (Exception failure) {
-                        resolverFailure = failure;
+                        resolverTransportFailure = resolverTransportFailure || failure instanceof java.io.IOException;
+                        Log.w(TAG, "source resolve failed for track " + selected.optString("id") + " (attempt " + (attempt + 1) + ")", failure);
                         if (attempt < PlaybackDiagnostics.MAX_SOURCE_RETRIES) {
-                            try { Thread.sleep(350); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+                            try { Thread.sleep(500L + (attempt * 350L)); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
                         }
                     }
                 }
-            } catch (Exception failure) { resolverFailure = failure; }
+            } catch (Exception failure) { resolverTransportFailure = failure instanceof java.io.IOException; }
             final String resolved = source;
-            final boolean resolverNetworkFailure = resolverFailure != null;
+            final boolean resolverNetworkFailure = resolverTransportFailure;
             main.post(new Runnable() { @Override public void run() {
                 if (released || exiting || request != generation) return;
                 resolving = false;

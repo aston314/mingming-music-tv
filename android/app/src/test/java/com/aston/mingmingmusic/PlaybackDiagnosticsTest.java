@@ -8,13 +8,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class PlaybackDiagnosticsTest {
-    @Test public void retriesTransientNetworkAndSourceFailuresOnlyOnce() {
+    @Test public void retriesTransientNetworkAndSourceFailuresTwice() {
         assertTrue(PlaybackDiagnostics.isRetryable(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED));
         assertTrue(PlaybackDiagnostics.isRetryable(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT));
         assertTrue(PlaybackDiagnostics.isRetryable(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS));
         assertTrue(PlaybackDiagnostics.isRetryable(PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE));
         assertFalse(PlaybackDiagnostics.isRetryable(PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED));
-        assertEquals(1, PlaybackDiagnostics.MAX_SOURCE_RETRIES);
+        assertEquals(2, PlaybackDiagnostics.MAX_SOURCE_RETRIES);
     }
 
     @Test public void classifiesFailuresWithoutIncludingSensitiveDetails() {

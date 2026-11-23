@@ -4,7 +4,9 @@ import androidx.media3.common.PlaybackException;
 
 /** Classifies player failures without exposing source URLs or resolver secrets. */
 final class PlaybackDiagnostics {
-    static final int MAX_SOURCE_RETRIES = 1;
+    // Three resolver/player attempts absorb the occasional empty or expired
+    // upstream result without making the user press Play again.
+    static final int MAX_SOURCE_RETRIES = 2;
 
     private PlaybackDiagnostics() {}
 
