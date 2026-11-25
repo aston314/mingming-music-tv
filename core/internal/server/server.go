@@ -24,6 +24,8 @@ type Server struct {
 	version, instance, dataDir string
 	fixture                    bool
 	client                     *http.Client
+	musicClient                *http.Client
+	musicPass                  musicPassState
 	mediaClient                *http.Client
 	mu                         sync.RWMutex
 	token                      string
@@ -49,6 +51,7 @@ func New(cfg product.Config, version, instance, dataDir string, fixture bool) *S
 		client:      &http.Client{Timeout: 45 * time.Second},
 		mediaClient: &http.Client{Transport: mediaTransport},
 	}
+	s.musicClient = newMusicClient(s.client)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.health)
 	mux.HandleFunc("/api/status", s.health)
@@ -144,13 +147,21 @@ func (s *Server) proxyPost(w http.ResponseWriter, r *http.Request) {
 func readBody(r *http.Request) []byte { b, _ := io.ReadAll(io.LimitReader(r.Body, 256<<10)); return b }
 
 func (s *Server) forward(w http.ResponseWriter, r *http.Request, method string, body []byte) {
+	ctx := r.Context()
+	if musicPassRequired(r.URL.Path) {
+		// The initial read, pass refresh and one replay share a deadline shorter
+		// than the WebView's 30s request window.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 25*time.Second)
+		defer cancel()
+	}
 	u, err := url.Parse(strings.TrimRight(s.cfg.Upstream, "/") + r.URL.Path)
 	if err != nil {
 		http.Error(w, "上游地址无效", 502)
 		return
 	}
 	u.RawQuery = r.URL.RawQuery
-	req, err := http.NewRequestWithContext(r.Context(), method, u.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "请求创建失败", 502)
 		return
@@ -164,7 +175,12 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, method string, 
 	if auth := s.authHeader(); auth != "" && r.URL.Path == "/api/comment" {
 		req.Header.Set("Authorization", auth)
 	}
-	resp, err := s.client.Do(req)
+	var resp *http.Response
+	if musicPassRequired(r.URL.Path) {
+		resp, err = s.musicRequest(req)
+	} else {
+		resp, err = s.client.Do(req)
+	}
 	if err != nil {
 		http.Error(w, "音乐服务暂时不可用", 502)
 		return

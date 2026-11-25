@@ -28,9 +28,18 @@ module.exports = async function lyricClock({browser, url}) {
     await page.waitForFunction(() => document.getElementById('player-title').textContent === '连续时钟测试');
     await page.locator('#now-playing').click();
     await page.waitForSelector('#overlay-lyrics .has-word-timing.active');
-    const elapsed = await page.locator('#overlay-elapsed').textContent();
+    // Navigation/loading can take longer than a second on a busy runner.
+    // Start the measured native sample after the lyric view is ready.
+    const sample = await page.evaluate(() => {
+      window.clockPlayback.snapshot.position = 0;
+      window.clockPlayback.positionAt = Date.now() - 400;
+      window.MingmingTVForeground();
+      return {elapsed: document.getElementById('overlay-elapsed').textContent,
+        style: document.querySelector('.lyric-word').getAttribute('style')};
+    });
+    const elapsed = sample.elapsed;
     assert.equal(elapsed, '00:00', 'positionAt keeps the short native sample in the first second: ' + elapsed);
-    const before = await page.locator('.lyric-word').first().getAttribute('style');
+    const before = sample.style;
     await page.waitForTimeout(250);
     const after = await page.locator('.lyric-word').first().getAttribute('style');
     assert.notEqual(after, before, 'active word continues to advance between native polls');

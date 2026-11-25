@@ -1,5 +1,13 @@
 # 明明音乐接口证据
 
+2026-11-25 匿名音乐访问凭证（原站 2.0.0，前端构建 2026-11-24）：
+
+- `POST /api/music/{list,search,url,lrc}` 和 `GET /api/word-lyric?id=108640` 在不携带凭证时均于约 0.5 秒返回 HTTP 401、`{"code":-1,"error":"NEED_PASS"}`；分类、分类歌单和评论仍返回 HTTP 200。这是访问协议变化，不是连接超时。
+- 公开音乐客户端 `assets/music-C9lGKs_d.js` 遇到首次 401 时请求 `GET /api/music-pass`，再重试原请求。该匿名 GET 返回 `success/ticket/expiresAt`，并设置 HttpOnly Cookie `deviceId`、`mm_pass`。无需登录或账号 Bearer；不要把具体 Cookie/ticket 写入证据、前端或播放快照。
+- 按官方流程取得 Cookie 后，榜单 `id=3778678&type=wy` 返回 200 首歌曲；歌曲 `108640` 返回 884 字符普通歌词、5957 字符逐字歌词和有效格式播放地址；搜索返回歌曲。此证据验证接口和解析结果，不代表实体 TV 已播放验证。
+- Go 使用独立内存 Cookie jar，仅用于现有六个音乐读取路由。识别 `401 NEED_PASS` 后合并并发刷新、保持原方法/参数/请求体并最多重试一次；凭证失效可再次获取，刷新失败短暂退避，整条请求受 25 秒上限约束。账号、评论及外部媒体请求不共享该 jar，不跟随音乐请求的跨源重定向。
+- 修改后的 Go 服务使用隔离数据目录从零启动，五个真实读取接口并发调用均返回 HTTP 200 / code 1，约 0.30–0.36 秒；播放地址重复读取约 0.28 秒，WebView 响应没有 `Set-Cookie`。这轮只验证请求结果，没有改变用户账号或在电视上播放。
+
 2026-10-13 网易云封面尺寸证据：用户提供的 `https://p3.music.126.net/DjFHDgJxYgByciKsCH3Tlg==/109951169614579889.jpg`，`param=800y800` 与 `param=400y400` 均返回HTTP200，响应体分别1,085,388和297,005字节。全屏旋转封面选择400×400；其他CDN保持原地址，查询参数及fragment保留。此测量确认响应尺寸/数据量，不代表Shield TV帧率已经验证。
 
 验证日期：2026-10-11；来源：[music.lzmhhh.com](https://music.lzmhhh.com/)。
