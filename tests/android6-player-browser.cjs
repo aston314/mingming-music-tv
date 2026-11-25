@@ -52,6 +52,12 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
       await page.waitForSelector('#recommend-playlists .playlist-card');
       await page.waitForFunction(() => document.getElementById('player-artist').textContent === '随歌声前进');
       assert.equal(await page.locator('#player-artist').evaluate(node => getComputedStyle(node).color), 'rgb(199, 243, 141)', 'footer lyrics keep their accent color without CSS variables');
+      await page.waitForFunction(() => !document.getElementById('player-heading-artist').hidden);
+      assert.equal(await page.locator('#player-heading-artist').textContent(), '· 测试歌手', 'legacy layout keeps the artist beside the song title');
+      assert.equal(await page.locator('#player-heading').evaluate(node => {
+        const title = document.getElementById('player-title').getBoundingClientRect(), artist = document.getElementById('player-heading-artist').getBoundingClientRect();
+        return artist.left >= title.right && artist.bottom <= document.getElementById('player-artist').getBoundingClientRect().top;
+      }), true, 'legacy title and artist share a row without overlapping the lyric');
       const shellLayout = await page.evaluate(() => {
         const cards = document.querySelectorAll('#recommend-playlists .playlist-card');
         const first = cards[0].getBoundingClientRect(), second = cards[1].getBoundingClientRect();

@@ -439,6 +439,10 @@
 .player-bar .now-playing{position:relative;display:block;height:82px;padding:14px 10px 10px 96px}
 .player-bar .now-playing img{position:absolute;left:10px;top:7px}
 .player-bar .now-playing-copy{position:absolute;top:50%;right:10px;left:96px;display:block;margin:0;transform:translateY(-50%)}
+.player-bar .now-playing .now-playing-heading{display:flex;align-items:baseline;margin:0;font-size:23px}
+.player-bar .now-playing #player-title{flex:0 0 auto;min-width:0;max-width:100%}
+.player-bar .now-playing #player-heading-artist{flex:0 1 auto;min-width:0;margin:0 0 0 6px;font-size:17px;font-weight:400;color:#acbeb0}
+.player-bar .now-playing #player-heading-artist[hidden]{display:none}
 .player-bar #player-artist.is-lyric{color:#c7f38d}
 .overlay-lyrics .lyric-line.active,#side-lyrics .lyric-line.active{color:#c7f38d}
 #overlay-lyrics.lyrics-four-line .lyric-line.active{color:#c7f38d}

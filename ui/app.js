@@ -55,6 +55,7 @@
         }
       }
       if (typeof centerLyrics === "function") centerLyrics();
+      scheduleFooterHeading();
       updateLyrics(playbackPosition(), true);
     }, 100);
   }
@@ -135,6 +136,7 @@
   var progressView = {percent: null, elapsed: null, duration: null};
   var libraryWrite = {inFlight: false, pending: false, revision: 0, callbacks: []};
   var queueLoading = {data: 0, covers: 0, token: 0};
+  var footerHeading = {track: null, artist: "", lyric: false, timer: null};
   // Native playback positions are samples. positionAt lets the lyric clock
   // extrapolate between samples instead of waiting for the 500ms bridge poll.
   var playback = {position: 0, duration: 0, positionAt: 0, generation: 0, pendingSeek: null, needsSource: false, sourceReady: false, resolving: false, wantPlay: false, errorKind: "", errorCode: 0, autoSkipCount: 0};
@@ -752,7 +754,7 @@
     if (app) app.classList.toggle("sidebar-icons-only", icons);
     writePreference("mingming.sidebarMode", icons ? "icons" : "expanded");
   }
-  function applyTextScale(mode) { var app = document.getElementById("app"), large = mode === "large"; if (app) app.classList.toggle("text-scale-large", large); writePreference("mingming.textScale", large ? "large" : "standard"); }
+  function applyTextScale(mode) { var app = document.getElementById("app"), large = mode === "large"; if (app) app.classList.toggle("text-scale-large", large); writePreference("mingming.textScale", large ? "large" : "standard"); scheduleFooterHeading(); }
   function applyMotionMode(mode) { var app = document.getElementById("app"), reduced = mode === "reduced"; if (app) app.classList.toggle("reduced-motion", reduced); writePreference("mingming.motion", reduced ? "reduced" : "normal"); }
   function renderUpdateStatus(data) {
     var current = document.getElementById("settings-current-version"), status = document.getElementById("settings-update-state"), button = document.getElementById("settings-check-update"), parsed = data;
@@ -1019,7 +1021,7 @@
   function renderQueueButton() {
     var button = document.getElementById("queue-open"), count = playbackItems().length, label = "播放列表 " + count;
     if (!button) return;
-    if (button.getAttribute("aria-label") !== label) { button.innerHTML = controlIcon("queue") + '<span>播放列表 <b>' + count + '</b></span>'; button.setAttribute("aria-label", label); button.title = label; }
+    if (button.getAttribute("aria-label") !== label) { button.innerHTML = controlIcon("queue") + '<span>播放列表 <b>' + count + '</b></span>'; button.setAttribute("aria-label", label); button.title = label; scheduleFooterHeading(); }
   }
   function playModeInfo() { var modes = {list: {label: "列表循环"}, one: {label: "单曲循环"}, shuffle: {label: "随机播放"}}; return modes[state.playMode] || modes.list; }
   function controlIcon(name) {
@@ -1139,6 +1141,30 @@
     }
     return answer < 0 ? 0 : answer;
   }
+  function scheduleFooterHeading() {
+    if (!footerHeading || !footerHeading.lyric || footerHeading.timer !== null) return;
+    // Measure only after metadata or layout changes, never on every clock tick.
+    footerHeading.timer = window.setTimeout(function () {
+      var heading = document.getElementById("player-heading"), title = document.getElementById("player-title"), suffix = document.getElementById("player-heading-artist"), width, titleWidth, minimum, show;
+      footerHeading.timer = null;
+      if (!heading || !title || !suffix) return;
+      width = heading.clientWidth; titleWidth = title.scrollWidth;
+      minimum = (parseFloat(window.getComputedStyle(suffix).fontSize) || 17) * 3 + 6;
+      show = !!(footerHeading.lyric && footerHeading.artist && width > 0 && width - titleWidth >= minimum);
+      if (suffix.hidden === show) suffix.hidden = !show;
+    }, 0);
+  }
+  function updateFooterHeading(isLyric) {
+    var title, name, suffix;
+    if (footerHeading.track === state.current && footerHeading.lyric === isLyric) return;
+    title = state.current ? songName(state.current) : "未在播放"; name = state.current ? artist(state.current) : ""; suffix = document.getElementById("player-heading-artist");
+    if (!suffix) return;
+    footerHeading.track = state.current; footerHeading.artist = name; footerHeading.lyric = isLyric;
+    if (document.getElementById("player-title").textContent !== title) document.getElementById("player-title").textContent = title;
+    if (suffix.textContent !== "· " + name) suffix.textContent = "· " + name;
+    if (!isLyric || !name) { if (!suffix.hidden) suffix.hidden = true; }
+    else scheduleFooterHeading();
+  }
   function updateFooterLyric(time) {
     var node = document.getElementById("player-artist"), line = state.lyricLines[lyricIndexForTime(time)], isLyric, text;
     if (!node) return;
@@ -1148,6 +1174,7 @@
     text = isLyric ? line.text : (state.current ? artist(state.current) : "选择一首歌曲开始播放");
     if (node.textContent !== text) node.textContent = text;
     if (node.classList.contains("is-lyric") !== isLyric) node.classList.toggle("is-lyric", isLyric);
+    updateFooterHeading(isLyric);
   }
   function updateLyrics(time, force) {
     var next, i, nodes, active, changed, line, isActive;
@@ -1216,7 +1243,7 @@
     if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
     playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.positionAt = 0; playback.generation = 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
     state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.lyricsWordLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
-    document.getElementById("player-title").textContent = songName(song); updateFooterLyric(playback.position); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderPlayerOverlay(); syncProgress();
+    updateFooterLyric(playback.position); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderPlayerOverlay(); syncProgress();
     loadLyricsComments(song, state.playToken);
     if (nativePlayer && !fromNative) { nativePendingSelection = ++nativeSelection; nativePlayer.command("select", JSON.stringify(nativeSnapshot())); }
   }
