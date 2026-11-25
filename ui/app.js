@@ -1139,8 +1139,19 @@
     }
     return answer < 0 ? 0 : answer;
   }
+  function updateFooterLyric(time) {
+    var node = document.getElementById("player-artist"), line = state.lyricLines[lyricIndexForTime(time)], isLyric, text;
+    if (!node) return;
+    // The fullscreen lookup selects the first line before it starts. The
+    // footer keeps the artist until a timed sentence has actually begun.
+    isLyric = !!(state.current && line && line.time >= 0 && line.time <= time && line.text);
+    text = isLyric ? line.text : (state.current ? artist(state.current) : "选择一首歌曲开始播放");
+    if (node.textContent !== text) node.textContent = text;
+    if (node.classList.contains("is-lyric") !== isLyric) node.classList.toggle("is-lyric", isLyric);
+  }
   function updateLyrics(time, force) {
     var next, i, nodes, active, changed, line, isActive;
+    updateFooterLyric(time);
     if (!state.playerOpen && !force) return;
     next = lyricIndexForTime(time);
     changed = !!force || next !== state.lyricIndex || !lyricActiveNode; state.lyricIndex = next;
@@ -1205,7 +1216,7 @@
     if (!nativePlayer) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
     playback.position = position || 0; playback.duration = duration || (Number(song.dt) / 1000) || 0; playback.positionAt = 0; playback.generation = 0; playback.pendingSeek = playback.position; playback.needsSource = true; playback.sourceReady = false; playback.resolving = false; playback.wantPlay = false;
     state.current = song; state.playToken += 1; state.lyricsText = "正在加载歌词…"; state.lyricLines = []; state.lyricIndex = -1; state.lyricsLoaded = false; state.lyricsWordLoaded = false; state.comments = []; state.commentsLoaded = false; state.commentsPage = 0; state.commentsTotal = 0; state.commentsMore = false; state.commentsLoading = false; state.commentsError = false; state.commentsRetryAt = 0; commentMotion.holdUntil = 0;
-    document.getElementById("player-title").textContent = songName(song); document.getElementById("player-artist").textContent = artist(song); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderPlayerOverlay(); syncProgress();
+    document.getElementById("player-title").textContent = songName(song); updateFooterLyric(playback.position); document.getElementById("player-cover").src = cover(song); updateTrackStates(); renderPlayerOverlay(); syncProgress();
     loadLyricsComments(song, state.playToken);
     if (nativePlayer && !fromNative) { nativePendingSelection = ++nativeSelection; nativePlayer.command("select", JSON.stringify(nativeSnapshot())); }
   }
@@ -1609,7 +1620,11 @@
   if (nativePlayer) window.setInterval(function () { if (!commentMotion.background && !document.hidden) refreshNativePlayback(); }, 500);
   // Keep the line clock alive when an old WebView emits sparse timeupdate
   // events, while requestAnimationFrame is reserved for an active timed word.
-  window.setInterval(function () { if (!document.hidden && state.playerOpen) { syncProgress(); updateLyrics(playbackPosition()); if (state.playbackStatus === "playing") syncLyricTicker(); } }, 100);
+  window.setInterval(function () {
+    if (document.hidden || commentMotion.background) return;
+    if (state.playerOpen) { syncProgress(); updateLyrics(playbackPosition()); if (state.playbackStatus === "playing") syncLyricTicker(); }
+    else if (state.current && state.playbackStatus === "playing") updateFooterLyric(playbackPosition());
+  }, 100);
   function fmt(n) { var minutes; n = Math.floor(n || 0); minutes = Math.floor(n / 60); return (minutes < 10 ? "0" : "") + minutes + ":" + (n % 60 < 10 ? "0" : "") + n % 60; }
   document.addEventListener("keydown", function (e) { if (e.keyCode === 27 || e.keyCode === 4) { if (handleBack()) e.preventDefault(); return; } if (e.keyCode === 37 || e.keyCode === 38 || e.keyCode === 39 || e.keyCode === 40 || e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 66) { e.preventDefault(); moveFocus(e.keyCode); } });
 

@@ -61,6 +61,7 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     let page = await context.newPage();
     await page.goto(url);
     await checkPausedRestore(page, snapshot);
+    await page.waitForFunction(() => document.getElementById('player-artist').textContent === '恢复位置对应歌词');
     assert.equal(sourceRequests, 0, 'startup must not resolve or fetch audio');
     assert.equal(await page.locator('#side-lyrics').count(), 0, 'home page keeps the playlist area clear of lyrics');
     for (const navPage of ['recommend', 'search', 'playlists', 'queue', 'favorites', 'account']) {

@@ -50,6 +50,8 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
         throw new Error(error.message + '; initial page state: ' + JSON.stringify(initialState));
       }
       await page.waitForSelector('#recommend-playlists .playlist-card');
+      await page.waitForFunction(() => document.getElementById('player-artist').textContent === '随歌声前进');
+      assert.equal(await page.locator('#player-artist').evaluate(node => getComputedStyle(node).color), 'rgb(199, 243, 141)', 'footer lyrics keep their accent color without CSS variables');
       const shellLayout = await page.evaluate(() => {
         const cards = document.querySelectorAll('#recommend-playlists .playlist-card');
         const first = cards[0].getBoundingClientRect(), second = cards[1].getBoundingClientRect();

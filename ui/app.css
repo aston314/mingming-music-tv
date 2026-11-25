@@ -439,6 +439,7 @@
 .player-bar .now-playing{position:relative;display:block;height:82px;padding:14px 10px 10px 96px}
 .player-bar .now-playing img{position:absolute;left:10px;top:7px}
 .player-bar .now-playing-copy{position:absolute;top:50%;right:10px;left:96px;display:block;margin:0;transform:translateY(-50%)}
+.player-bar #player-artist.is-lyric{color:#c7f38d}
 .overlay-lyrics .lyric-line.active,#side-lyrics .lyric-line.active{color:#c7f38d}
 #overlay-lyrics.lyrics-four-line .lyric-line.active{color:#c7f38d}
 
