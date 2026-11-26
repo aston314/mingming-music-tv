@@ -79,6 +79,8 @@
 .account-message{min-height:20px;color:#eeb47d;font-size:13px}
 .account-action:focus{outline:2px solid #fff;outline-offset:3px;box-shadow:0 0 0 4px rgba(199,243,141,.24)}
 .settings-page{display:flex;flex-direction:column;gap:18px;max-width:900px;padding-bottom:32px}.settings-card{padding:24px 28px;border:1px solid rgba(199,243,141,.18);border-radius:14px;background:linear-gradient(110deg,rgba(31,48,35,.82),rgba(19,29,22,.62));box-shadow:0 12px 32px rgba(0,0,0,.12)}.settings-card h2{margin:0 0 10px;font-size:24px}.settings-card p{margin:0 0 16px;color:#9eaea2;color:var(--muted);font-size:17px;line-height:1.55}.settings-card p strong{color:#eef4ee}.settings-actions{display:flex;gap:12px;flex-wrap:wrap}.settings-state{min-height:24px;margin-top:14px!important;margin-bottom:0!important;color:#c7f38d!important;color:var(--accent)!important}.settings-card .account-action[aria-pressed="true"]{border-color:#c7f38d;background:#c7f38d;color:#162119}.sidebar-icons-only .nav-item>span:not(.nav-icon),.sidebar-icons-only .nav-item>b{display:none}.sidebar-icons-only .sidebar{width:92px;flex-basis:92px;padding-left:12px;padding-right:12px}.sidebar-icons-only .nav-item{justify-content:center;padding-left:0;padding-right:0}.sidebar-icons-only .nav-icon{margin:0}
+.layout-soft .sidebar-icons-only .sidebar-brand{padding-left:0;padding-right:0;display:flex;justify-content:center}
+.layout-soft .sidebar-icons-only .sidebar-brand .brand-name{display:none}
 .settings-card h3{margin:20px 0 8px;font-size:19px;color:#d9e8da}.text-scale-large .nav-item{font-size:28px}.text-scale-large .page-title h1{font-size:38px}.text-scale-large .page-title p{font-size:18px}.text-scale-large .track-info strong{font-size:31px}.text-scale-large .track-info span{font-size:25px}.text-scale-large .comment-meta strong{font-size:16px}.text-scale-large .comment-meta span{font-size:14px}.text-scale-large .comment p{font-size:17px}.text-scale-large .lyric-line{font-size:20px}.text-scale-large .lyric-line.active{font-size:23px}.reduced-motion *,.reduced-motion *::before,.reduced-motion *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}.reduced-motion .overlay-comments{scroll-behavior:auto!important}
 .modal-actions[hidden]{display:none}
 .device-limit{margin-top:10px;padding-top:16px;border-top:1px solid rgba(150,185,153,.2)}
@@ -561,10 +563,12 @@ body{width:100%;height:100%;margin:0;overflow:hidden;background:#101713}
    treatment available for browser comparison. */
 .layout-soft #stage{background:#101713}
 .layout-soft .topbar{border-bottom:0;background:#101713;box-shadow:none}
-.layout-soft .workspace{gap:14px;padding:0}
-.layout-soft .sidebar{margin-top:0;border-right:0;border-radius:24px 24px 0 0;background:#0f1a13;box-shadow:none}
-.layout-soft .content{margin:0;border-radius:24px 24px 0 0;background:#17251d;box-shadow:none}
-.layout-soft .side-panel{margin:0;border-left:0;border-radius:24px 24px 0 0;background:#17251d;box-shadow:none}
+.layout-soft .workspace{gap:0;padding:0}
+.layout-soft .sidebar{margin-top:0;border-right:0;border-radius:0;background:#0f1a13;box-shadow:none}
+.layout-soft .sidebar-brand{flex:0 0 auto;padding:0 16px 30px 22px}
+.layout-soft .sidebar-brand .top-status{margin:0;width:0;height:0;overflow:hidden}
+.layout-soft .content{margin:0;padding-top:24px;border-radius:0;background:#17251d;box-shadow:none}
+.layout-soft .side-panel{margin:0;border-left:0;border-radius:0;background:#17251d;box-shadow:none}
 .layout-soft .page-title{margin-bottom:28px}
 .layout-soft .section-heading{margin-top:30px;margin-bottom:16px}
 .layout-soft .hero{box-shadow:0 16px 36px rgba(0,0,0,.22)}

@@ -65,6 +65,8 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
         const categoryGap = categories[1].getBoundingClientRect().left - categories[0].getBoundingClientRect().right;
         const logo = document.querySelector('.brand-mark').getBoundingClientRect();
         const name = document.querySelector('.brand-name').getBoundingClientRect();
+          const sidebar = document.querySelector('.sidebar');
+          const content = document.getElementById('content');
         const nav = document.getElementById('nav-recommend');
         nav.focus();
         const focusStyle = getComputedStyle(nav);
@@ -74,6 +76,16 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
         const rowGap = controlItems[1].left - controlItems[0].right;
         return {
           legacy: document.documentElement.className.indexOf('legacy-layout') >= 0,
+            brandInSidebar: !!document.querySelector('.sidebar .sidebar-brand .brand'),
+            topbar: !!document.querySelector('.topbar'),
+            outerLayout: {
+              workspaceGap: getComputedStyle(document.querySelector('.workspace')).gap,
+              sidebarRadius: getComputedStyle(sidebar).borderRadius,
+              contentRadius: getComputedStyle(content).borderRadius,
+              contentTop: content.getBoundingClientRect().top,
+              sidebarTop: sidebar.getBoundingClientRect().top
+            },
+            navRadius: getComputedStyle(nav).borderRadius,
           gridDisplay: getComputedStyle(document.querySelector('.playlist-grid')).display,
           playlistColumns: Math.abs(first.top - second.top) < 1 && second.left > first.right,
           categoryGap: categoryGap,
@@ -85,6 +97,20 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
         };
       });
       assert.equal(shellLayout.legacy, true, 'legacy layout fallback is enabled');
+      assert.equal(shellLayout.brandInSidebar, true, 'logo is part of the full-height sidebar rail');
+      assert.equal(shellLayout.topbar, false, 'separate top bar is removed');
+      assert.equal(shellLayout.outerLayout.workspaceGap === '0px' || shellLayout.outerLayout.workspaceGap === 'normal', true, 'legacy WebView falls back to zero workspace gap');
+      assert.deepEqual({sidebarRadius: shellLayout.outerLayout.sidebarRadius, contentRadius: shellLayout.outerLayout.contentRadius, contentTop: shellLayout.outerLayout.contentTop, sidebarTop: shellLayout.outerLayout.sidebarTop}, {sidebarRadius: '0px', contentRadius: '0px', contentTop: 0, sidebarTop: 0}, 'outer rail and content are flush and square');
+      assert.equal(shellLayout.navRadius, '9px', 'sidebar button rounding remains unchanged');
+      const iconRail = await page.evaluate(() => {
+        const app = document.getElementById('app'), brand = document.querySelector('.sidebar-brand'), name = document.querySelector('.sidebar-brand .brand-name');
+        app.classList.add('sidebar-icons-only');
+        const result = {width: brand.getBoundingClientRect().width, nameDisplay: getComputedStyle(name).display, nameOverflow: name.getBoundingClientRect().right > document.querySelector('.sidebar').getBoundingClientRect().right};
+        app.classList.remove('sidebar-icons-only');
+        return result;
+      });
+      assert.equal(iconRail.nameDisplay, 'none', 'icon-only sidebar hides the integrated app name');
+      assert.equal(iconRail.nameOverflow, false, 'icon-only sidebar keeps the logo inside the rail');
       assert.equal(shellLayout.gridDisplay, 'flex', 'playlist grid falls back to a flex row');
       assert.equal(shellLayout.playlistColumns, true, 'popular playlists use multiple columns');
       assert.ok(shellLayout.categoryGap >= 4, 'category filters have visible horizontal spacing');
