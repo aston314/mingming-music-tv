@@ -62,12 +62,13 @@ async function runFocusAudit(stage) {
   if(stage==='pages') {
     page('recommend');await auditWait(180);
     for(var nav of document.querySelectorAll('.nav-item')){auditFocus(nav);auditMove(22);auditCheck(document.getElementById('content').contains(document.activeElement),'sidebar right enters content');}
+    auditFocus('[data-page="recommend"]');auditMove(22);auditCheck(document.activeElement.matches('#recommend-controls .category-tab:first-child'),'recommend navigation enters first category');
     auditPath('.category-tab:last-child',22,'.category-tab:last-child','category right boundary');
     auditFocus('[data-category-index="1"]');document.activeElement.click();await auditWait();auditCheck(document.activeElement.getAttribute('data-category-index')==='1','category redraw retains focus');
     auditFocus('[data-subcat="摇滚"]');document.activeElement.click();await auditWait();auditCheck(document.activeElement.getAttribute('data-subcat')==='摇滚','subcategory redraw retains focus');
     await auditSweep('#content');await auditSweep('.sidebar');
-    auditPath('.playlist-card',21,'[data-page="recommend"]','card left returns active navigation');auditMove(22);auditCheck(document.activeElement.classList.contains('playlist-card'),'navigation right restores card');
-    var card=document.activeElement;card.click();await auditWait(150);auditCheck(document.activeElement.classList.contains('track-row'),'detail enters first song');await auditSweep('#content');MingmingTVBack();await auditWait(160);auditCheck(document.activeElement.getAttribute('data-playlist-id')===card.getAttribute('data-playlist-id'),'detail back restores card');
+    auditPath('.playlist-card',21,'[data-page="recommend"]','card left returns active navigation');auditMove(22);auditCheck(document.activeElement.matches('#recommend-controls .category-tab:first-child'),'navigation right enters first category');
+    auditFocus('.playlist-card');var card=document.activeElement;card.click();await auditWait(150);auditCheck(document.activeElement.classList.contains('track-row'),'detail enters first song');await auditSweep('#content');MingmingTVBack();await auditWait(160);auditCheck(document.activeElement.getAttribute('data-playlist-id')===card.getAttribute('data-playlist-id'),'detail back restores card');
     a.delayDetail=true;auditFocus('.playlist-card');document.activeElement.click();auditFocus('[data-page="search"]');await auditWait(350);auditCheck(document.activeElement.getAttribute('data-page')==='search','late detail never steals focus');MingmingTVBack();a.delayDetail=false;await auditWait(100);
     for (var destination of ['player','sidebar']) {
       auditFocus('.playlist-card');document.activeElement.click();await auditWait(100);

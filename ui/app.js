@@ -264,6 +264,14 @@
     focusTarget(target || (root === content ? activeNav() : document.getElementById("player-close")));
   }
   function contentEntry() { var key = focusMemory.content[state.page], target = resolveBookmark(content, key); return target || firstFocusable(content) || activeNav(); }
+  function sidebarContentEntry() {
+    var category;
+    if (state.page === "recommend") {
+      category = document.querySelector("#recommend-controls .category-tab.focusable");
+      if (category && isFocusable(category)) return category;
+    }
+    return contentEntry();
+  }
   function focusInitial() { var root = focusRoot(), target; if (root === document) target = activeNav(); else if (state.queueOpen && root.id === "queue-popup") target = root.querySelector(".track-row") || document.getElementById("queue-popup-close"); else target = firstFocusable(root); focusTarget(target); }
   function scrollFocusIntoView(root, target, keepTallPosition) {
     var rootRect, targetRect, top, bottom, padding = 8, next, max;
@@ -389,7 +397,7 @@
     else if (state.queueOpen) target = trackCardFocus(code, active) || active;
     else if (active.classList.contains("nav-item")) {
       navs = visibleFocusables(document.querySelector(".sidebar")); index = navs.indexOf(active);
-      if (code === 39) target = contentEntry();
+      if (code === 39) target = sidebarContentEntry();
       else if (code === 38) target = navs[Math.max(0, index - 1)];
       else if (code === 40) { target = navs[index + 1] || document.getElementById("now-playing"); if (index === navs.length - 1) focusMemory.footerReturn = null; }
       else target = active;
