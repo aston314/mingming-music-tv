@@ -50,6 +50,7 @@ module.exports = async function android6Player({browser, url, screenshotsDir}) {
         throw new Error(error.message + '; initial page state: ' + JSON.stringify(initialState));
       }
       await page.waitForSelector('#recommend-playlists .playlist-card');
+      assert.deepEqual(await page.locator('#recommend-playlists .playlist-card small').allTextContents(), ['12 首', '24 首', '18 首'], 'playlist posters keep only track-count statistics beneath their titles');
       await page.waitForFunction(() => document.getElementById('player-artist').textContent === '随歌声前进');
       assert.equal(await page.locator('#player-artist').evaluate(node => getComputedStyle(node).color), 'rgb(199, 243, 141)', 'footer lyrics keep their accent color without CSS variables');
       await page.waitForFunction(() => !document.getElementById('player-heading-artist').hidden);
