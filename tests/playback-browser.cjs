@@ -49,9 +49,9 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
   }
   async function checkPausedRestore(page, expected) {
     await page.waitForFunction(name => document.getElementById('player-title').textContent === name, expected.track.name);
-    const actual = await page.evaluate(() => ({paused: document.getElementById('audio').paused, src: document.getElementById('audio').getAttribute('src'), calls: window.audioPlayCalls, elapsed: document.getElementById('player-elapsed').textContent, duration: document.getElementById('player-duration').textContent, mode: document.getElementById('play-mode').textContent, focus: document.activeElement.id}));
+    const actual = await page.evaluate(() => ({paused: document.getElementById('audio').paused, src: document.getElementById('audio').getAttribute('src'), calls: window.audioPlayCalls, elapsed: document.getElementById('player-elapsed').textContent, duration: document.getElementById('player-duration').textContent, mode: document.getElementById('play-mode').getAttribute('aria-label'), focus: document.activeElement.id}));
     assert.equal(actual.paused, true); assert.equal(actual.src, null); assert.equal(actual.calls, 0);
-    assert.equal(actual.duration, '02:00'); assert.equal(actual.mode, '随机播放'); assert.equal(actual.focus, 'nav-recommend');
+    assert.equal(actual.duration, '02:00'); assert.equal(actual.mode, '播放顺序：随机播放'); assert.equal(actual.focus, 'nav-recommend');
     assert.match(actual.elapsed, /^00:4[7-9]$/);
   }
   try {
@@ -62,10 +62,19 @@ module.exports = async function testPlayback({browser, url, restart, screenshots
     await page.goto(url);
     await checkPausedRestore(page, snapshot);
     await page.waitForFunction(() => document.getElementById('player-artist').textContent === '恢复位置对应歌词');
+    assert.equal(await page.locator('#play-mode svg').count(), 1, 'footer playback mode is represented by an SVG icon');
+    assert.equal(await page.locator('#play-mode').evaluate(node => node.textContent.trim()), '', 'footer playback mode has no visible label');
+    assert.equal(await page.locator('#queue-open svg').count(), 1, 'footer queue button is represented by an SVG icon');
+    assert.equal(await page.locator('#queue-open').evaluate(node => node.textContent.trim()), '', 'footer queue button has no visible label or count');
+    assert.match(await page.locator('#play-mode').getAttribute('aria-label'), /随机播放/);
+    assert.equal(await page.locator('#queue-open').getAttribute('aria-label'), '播放列表 2');
+    assert.equal(await page.locator('.page-title p').count(), 0, 'recommendation explanatory subtitle is omitted');
     assert.equal(sourceRequests, 0, 'startup must not resolve or fetch audio');
     assert.equal(await page.locator('#side-lyrics').count(), 0, 'home page keeps the playlist area clear of lyrics');
     for (const navPage of ['recommend', 'search', 'playlists', 'queue', 'favorites', 'account']) {
       await page.locator('.nav-item[data-page="' + navPage + '"]').click();
+      const subtitleCount = await page.locator('.page-title p').count();
+      assert.equal(subtitleCount, ['queue', 'favorites'].includes(navPage) ? 1 : 0, navPage + ' only keeps its song-count statistic when present');
       const navigationLayout = await page.locator('#content').evaluate(node => ({
         right: node.getBoundingClientRect().right,
         workspaceRight: node.parentNode.getBoundingClientRect().right,
