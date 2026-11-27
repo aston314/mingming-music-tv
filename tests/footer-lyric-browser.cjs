@@ -89,6 +89,12 @@ module.exports = async function footerLyric({browser, url, screenshotsDir}) {
       await sample(3.2);
       const after = await page.locator('.player-bar').evaluate(node => Array.from(node.children, item => { const r = item.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }));
       assert.deepEqual(after, before, 'long lyrics preserve footer geometry at ' + size.width);
+      const coverAlignment = await page.locator('#now-playing').evaluate(node => {
+        const cover = document.getElementById('player-cover').getBoundingClientRect();
+        const button = node.getBoundingClientRect();
+        return Math.abs((cover.top + cover.height / 2) - (button.top + button.height / 2));
+      });
+      assert.ok(coverAlignment <= 1, 'footer artwork stays vertically centered at ' + size.width);
       const style = await page.locator('#player-artist').evaluate(node => { const css = getComputedStyle(node); return {whiteSpace: css.whiteSpace, overflow: css.overflow, ellipsis: css.textOverflow, color: css.color, clipped: node.scrollWidth > node.clientWidth, titleSize: parseFloat(getComputedStyle(document.getElementById('player-title')).fontSize), size: parseFloat(css.fontSize)}; });
       assert.deepEqual([style.whiteSpace, style.overflow, style.ellipsis, style.color, style.clipped], ['nowrap', 'hidden', 'ellipsis', 'rgb(199, 243, 141)', true]);
       assert.ok(style.size < style.titleSize, 'lyrics remain smaller than the song title');
